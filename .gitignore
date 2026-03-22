@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+quant_envi/
+
+# Cached data
+data/cache/
+
+# IDE
+.vscode/
+.idea/
