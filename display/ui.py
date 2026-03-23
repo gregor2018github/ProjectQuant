@@ -183,6 +183,14 @@ def _build_html(
     pct_return = (total_return / initial_capital) * 100
     ret_color = "#26a69a" if total_return >= 0 else "#ef5350"
 
+    bh_return = result.buy_hold_final_value - initial_capital
+    bh_pct = (bh_return / initial_capital) * 100
+    bh_color = "#26a69a" if bh_return >= 0 else "#ef5350"
+
+    vs_bh = result.final_value - result.buy_hold_final_value
+    vs_bh_pct = (vs_bh / result.buy_hold_final_value) * 100 if result.buy_hold_final_value else 0
+    vs_bh_color = "#26a69a" if vs_bh >= 0 else "#ef5350"
+
     # Build trade table rows
     trade_rows = ""
     for i, t in enumerate(result.trades, 1):
@@ -198,6 +206,7 @@ def _build_html(
             <td>${t.capital_start:,.2f}</td>
             <td>${t.investment:,.2f}</td>
             <td>${t.capital_end:,.2f}</td>
+            <td>${t.bh_capital_end:,.2f}</td>
             <td style="color:{pnl_color};font-weight:600">${t.pnl:,.2f}</td>
         </tr>"""
 
@@ -294,6 +303,14 @@ def _build_html(
     <div class="label">Trades</div>
     <div class="value">{len(result.trades)}</div>
   </div>
+  <div class="stat">
+    <div class="label">Buy &amp; Hold Return</div>
+    <div class="value" style="color:{bh_color}">${bh_return:,.2f} ({bh_pct:+.2f}%)</div>
+  </div>
+  <div class="stat">
+    <div class="label">Strategy vs Buy &amp; Hold</div>
+    <div class="value" style="color:{vs_bh_color}">${vs_bh:,.2f} ({vs_bh_pct:+.2f}%)</div>
+  </div>
 </div>
 
 <!-- Trade Log -->
@@ -305,7 +322,7 @@ def _build_html(
       <tr>
         <th>#</th><th>Entry Date</th><th>Entry Price</th>
         <th>Exit Date</th><th>Exit Price</th><th>Shares</th>
-        <th>Capital Start</th><th>Investment</th><th>Capital End</th><th>P&amp;L</th>
+        <th>Capital Start</th><th>Investment</th><th>Capital End</th><th>B&amp;H Capital End</th><th>P&amp;L</th>
       </tr>
     </thead>
     <tbody>{trade_rows}</tbody>

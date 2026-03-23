@@ -19,13 +19,22 @@ def print_report(
     total_return = result.final_value - initial_capital
     pct_return = (total_return / initial_capital) * 100
 
+    bh_return = result.buy_hold_final_value - initial_capital
+    bh_pct = (bh_return / initial_capital) * 100
+    vs_bh = result.final_value - result.buy_hold_final_value
+    vs_bh_pct = (vs_bh / result.buy_hold_final_value) * 100 if result.buy_hold_final_value else 0
+
     # --- Summary panel ---
     summary = (
         f"[bold]{ticker}[/bold]  {start} -> {end}\n"
         f"Starting capital: [cyan]${initial_capital:,.2f}[/cyan]\n"
         f"Final value:      [cyan]${result.final_value:,.2f}[/cyan]\n"
         f"Return:           [{'green' if total_return >= 0 else 'red'}]"
-        f"${total_return:,.2f} ({pct_return:+.2f}%)[/]"
+        f"${total_return:,.2f} ({pct_return:+.2f}%)[/]\n"
+        f"Buy & Hold:       [{'green' if bh_return >= 0 else 'red'}]"
+        f"${bh_return:,.2f} ({bh_pct:+.2f}%)[/]\n"
+        f"vs Buy & Hold:    [{'green' if vs_bh >= 0 else 'red'}]"
+        f"${vs_bh:,.2f} ({vs_bh_pct:+.2f}%)[/]"
     )
     console.print(Panel(summary, title="Backtest Summary", border_style="blue"))
 
@@ -44,6 +53,7 @@ def print_report(
     table.add_column("Capital Start", justify="right")
     table.add_column("Investment", justify="right")
     table.add_column("Capital End", justify="right")
+    table.add_column("B&H Capital End", justify="right")
     table.add_column("P&L", justify="right")
 
     for i, t in enumerate(result.trades, 1):
@@ -58,6 +68,7 @@ def print_report(
             f"${t.capital_start:,.2f}",
             f"${t.investment:,.2f}",
             f"${t.capital_end:,.2f}",
+            f"${t.bh_capital_end:,.2f}",
             f"[{pnl_style}]${t.pnl:,.2f}[/{pnl_style}]",
         )
 

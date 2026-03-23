@@ -16,6 +16,7 @@ class Trade:
     capital_start: float
     capital_end: float
     investment: float
+    bh_capital_end: float = 0.0
 
 
 @dataclass
@@ -23,6 +24,7 @@ class BacktestResult:
     trades: list[Trade] = field(default_factory=list)
     equity_curve: pd.Series = field(default_factory=lambda: pd.Series(dtype=float))
     final_value: float = 0.0
+    buy_hold_final_value: float = 0.0
 
 
 class Backtester:
@@ -37,6 +39,11 @@ class Backtester:
         entry_price = 0.0
         entry_date = ""
         capital_at_entry = 0.0
+
+        # Buy-and-hold baseline: buy at first close, hold until end
+        first_close = float(df["Close"].iloc[0])
+        bh_shares = int(self.initial_capital // first_close)
+        bh_cash = self.initial_capital - bh_shares * first_close
 
         trades: list[Trade] = []
         equity: dict[str, float] = {}
@@ -61,6 +68,7 @@ class Backtester:
                 investment = shares * entry_price
                 cash += shares * price
                 capital_at_exit = cash
+                bh_value = bh_shares * price + bh_cash
                 trades.append(Trade(
                     entry_date=entry_date,
                     entry_price=round(entry_price, 2),
@@ -71,6 +79,7 @@ class Backtester:
                     capital_start=round(capital_at_entry, 2),
                     capital_end=round(capital_at_exit, 2),
                     investment=round(investment, 2),
+                    bh_capital_end=round(bh_value, 2),
                 ))
                 shares = 0
 
@@ -84,6 +93,7 @@ class Backtester:
             investment = shares * entry_price
             cash += shares * last_price
             capital_at_exit = cash
+            bh_value = bh_shares * last_price + bh_cash
             trades.append(Trade(
                 entry_date=entry_date,
                 entry_price=round(entry_price, 2),
@@ -94,14 +104,19 @@ class Backtester:
                 capital_start=round(capital_at_entry, 2),
                 capital_end=round(capital_at_exit, 2),
                 investment=round(investment, 2),
+                bh_capital_end=round(bh_value, 2),
             ))
             equity[last_date] = cash
 
         equity_series = pd.Series(equity, dtype=float)
         equity_series.index = pd.to_datetime(equity_series.index)
 
+        last_close = float(df["Close"].iloc[-1])
+        bh_final = round(bh_shares * last_close + bh_cash, 2)
+
         return BacktestResult(
             trades=trades,
             equity_curve=equity_series,
             final_value=round(equity_series.iloc[-1], 2) if len(equity_series) else self.initial_capital,
+            buy_hold_final_value=bh_final,
         )
