@@ -6,6 +6,7 @@ from data.fetcher import fetch_data, download_ticker, download_sp500
 from strategies.sma_cross import SMACrossStrategy
 from engine.backtester import Backtester
 from display.report import print_report
+from display.ui import launch_ui
 
 
 def parse_args():
@@ -91,6 +92,18 @@ def main():
 
     # 4. Display results
     print_report(args.ticker, args.start, args.end, args.capital, result)
+
+    # 5. Launch interactive UI
+    launch_ui(
+        ticker=args.ticker,
+        start=args.start,
+        end=args.end,
+        initial_capital=args.capital,
+        result=result,
+        df=df,
+        short_window=args.short_window,
+        long_window=args.long_window,
+    )
 
 
 if __name__ == "__main__":

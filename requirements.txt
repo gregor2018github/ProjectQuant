@@ -2,3 +2,4 @@ yfinance>=1.2.0
 pandas>=3.0.0
 rich>=14.0.0
 lxml>=5.0.0
+plotly>=6.0.0
