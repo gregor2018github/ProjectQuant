@@ -41,6 +41,9 @@ def print_report(
     table.add_column("Exit Date")
     table.add_column("Exit Price", justify="right")
     table.add_column("Shares", justify="right")
+    table.add_column("Capital Start", justify="right")
+    table.add_column("Investment", justify="right")
+    table.add_column("Capital End", justify="right")
     table.add_column("P&L", justify="right")
 
     for i, t in enumerate(result.trades, 1):
@@ -52,6 +55,9 @@ def print_report(
             t.exit_date,
             f"${t.exit_price:,.2f}",
             str(t.shares),
+            f"${t.capital_start:,.2f}",
+            f"${t.investment:,.2f}",
+            f"${t.capital_end:,.2f}",
             f"[{pnl_style}]${t.pnl:,.2f}[/{pnl_style}]",
         )
 

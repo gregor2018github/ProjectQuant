@@ -13,6 +13,9 @@ class Trade:
     exit_price: float
     shares: int
     pnl: float
+    capital_start: float
+    capital_end: float
+    investment: float
 
 
 @dataclass
@@ -33,6 +36,7 @@ class Backtester:
         shares = 0
         entry_price = 0.0
         entry_date = ""
+        capital_at_entry = 0.0
 
         trades: list[Trade] = []
         equity: dict[str, float] = {}
@@ -46,6 +50,7 @@ class Backtester:
             if sig == 1 and shares == 0:
                 shares = int(cash // price)
                 if shares > 0:
+                    capital_at_entry = cash
                     entry_price = price
                     entry_date = date_str
                     cash -= shares * price
@@ -53,7 +58,9 @@ class Backtester:
             # --- exit ---
             elif sig == 0 and shares > 0:
                 pnl = (price - entry_price) * shares
+                investment = shares * entry_price
                 cash += shares * price
+                capital_at_exit = cash
                 trades.append(Trade(
                     entry_date=entry_date,
                     entry_price=round(entry_price, 2),
@@ -61,6 +68,9 @@ class Backtester:
                     exit_price=round(price, 2),
                     shares=shares,
                     pnl=round(pnl, 2),
+                    capital_start=round(capital_at_entry, 2),
+                    capital_end=round(capital_at_exit, 2),
+                    investment=round(investment, 2),
                 ))
                 shares = 0
 
@@ -71,7 +81,9 @@ class Backtester:
             last_price = float(df["Close"].iloc[-1])
             last_date = str(df.index[-1].date()) if hasattr(df.index[-1], "date") else str(df.index[-1])
             pnl = (last_price - entry_price) * shares
+            investment = shares * entry_price
             cash += shares * last_price
+            capital_at_exit = cash
             trades.append(Trade(
                 entry_date=entry_date,
                 entry_price=round(entry_price, 2),
@@ -79,6 +91,9 @@ class Backtester:
                 exit_price=round(last_price, 2),
                 shares=shares,
                 pnl=round(pnl, 2),
+                capital_start=round(capital_at_entry, 2),
+                capital_end=round(capital_at_exit, 2),
+                investment=round(investment, 2),
             ))
             equity[last_date] = cash
 
