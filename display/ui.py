@@ -641,51 +641,97 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
 
     # ── Histogram: strategy return distribution ────────────────────────
     if successful:
-        strat_returns = [r.strategy_return_pct for r in successful]
+        import math
+        import numpy as np
+
+        def _auto_bin_size(values: list, target_bins: int = 40) -> float:
+            """Round bin size to a 'nice' number targeting ~target_bins buckets."""
+            spread = max(values) - min(values)
+            if spread == 0:
+                return 1.0
+            raw = spread / target_bins
+            magnitude = 10 ** math.floor(math.log10(abs(raw)))
+            for nice in (1, 2, 2.5, 5, 10):
+                if nice * magnitude >= raw:
+                    return nice * magnitude
+            return 10 * magnitude
+
+        def _clip_tails(values: list, pct: float = 5.0):
+            """Clip bottom/top pct% into the edge bins. Returns clipped list + cutoffs + counts."""
+            lo = float(np.percentile(values, pct))
+            hi = float(np.percentile(values, 100 - pct))
+            clipped = [max(lo, min(hi, v)) for v in values]
+            n_lo = sum(1 for v in values if v < lo)
+            n_hi = sum(1 for v in values if v > hi)
+            return clipped, lo, hi, n_lo, n_hi
+
+        def _tail_annotations(lo, hi, n_lo, n_hi) -> list:
+            """Build Plotly annotation dicts for the overflow edge bins."""
+            anns = []
+            fmt = lambda v: f"${v:,.0f}"
+            if n_lo > 0:
+                anns.append(dict(
+                    x=lo, y=0, xref="x", yref="paper",
+                    text=f"≤ {fmt(lo)}<br>({n_lo})",
+                    showarrow=False, yanchor="bottom",
+                    font=dict(size=10, color="#aaa"),
+                    xanchor="right",
+                ))
+            if n_hi > 0:
+                anns.append(dict(
+                    x=hi, y=0, xref="x", yref="paper",
+                    text=f"≥ {fmt(hi)}<br>({n_hi})",
+                    showarrow=False, yanchor="bottom",
+                    font=dict(size=10, color="#aaa"),
+                    xanchor="left",
+                ))
+            return anns
+
+        strat_pnl = [r.final_value - r.initial_capital for r in successful]
+        strat_clipped, s_lo, s_hi, s_n_lo, s_n_hi = _clip_tails(strat_pnl)
+        bin_size_strat = _auto_bin_size(strat_clipped)
         hist_strat_fig = go.Figure(go.Histogram(
-            x=strat_returns,
-            xbins=dict(size=10),
+            x=strat_clipped,
+            xbins=dict(size=bin_size_strat),
             marker=dict(
-                color=[
-                    "#26a69a" if v >= 0 else "#ef5350"
-                    for v in strat_returns
-                ],
+                color=["#26a69a" if v >= 0 else "#ef5350" for v in strat_clipped],
                 line=dict(width=0.5, color="#1e1e1e"),
             ),
-            hovertemplate="Range: %{x}<br>Count: %{y}<extra></extra>",
+            hovertemplate="P&L: $%{x:,.0f}<br>Count: %{y}<extra></extra>",
         ))
         hist_strat_fig.add_vline(x=0, line=dict(color="#888", dash="dash", width=1))
         hist_strat_fig.update_layout(
-            xaxis_title="Strategy Return %",
+            xaxis_title="Strategy P&L (USD)",
             yaxis_title="Number of Tickers",
             bargap=0.05,
-            **_dark_fig_layout("Strategy Return Distribution", height=420),
+            annotations=_tail_annotations(s_lo, s_hi, s_n_lo, s_n_hi),
+            **_dark_fig_layout("Strategy P&L Distribution", height=420),
         )
-        hist_strat_fig.update_xaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+        hist_strat_fig.update_xaxes(gridcolor="#333", showgrid=True, tickprefix="$", tickformat=",.0f")
         hist_strat_fig.update_yaxes(gridcolor="#333", showgrid=True)
         hist_strat_div = hist_strat_fig.to_html(full_html=False, include_plotlyjs=False)
 
-        vs_bh_returns = [r.strategy_return_pct - r.buy_hold_return_pct for r in successful]
+        vs_bh_pnl = [r.final_value - r.buy_hold_final_value for r in successful]
+        vsbh_clipped, v_lo, v_hi, v_n_lo, v_n_hi = _clip_tails(vs_bh_pnl)
+        bin_size_vsbh = _auto_bin_size(vsbh_clipped)
         hist_vsbh_fig = go.Figure(go.Histogram(
-            x=vs_bh_returns,
-            xbins=dict(size=10),
+            x=vsbh_clipped,
+            xbins=dict(size=bin_size_vsbh),
             marker=dict(
-                color=[
-                    "#26a69a" if v >= 0 else "#ef5350"
-                    for v in vs_bh_returns
-                ],
+                color=["#26a69a" if v >= 0 else "#ef5350" for v in vsbh_clipped],
                 line=dict(width=0.5, color="#1e1e1e"),
             ),
-            hovertemplate="Range: %{x}<br>Count: %{y}<extra></extra>",
+            hovertemplate="Edge: $%{x:,.0f}<br>Count: %{y}<extra></extra>",
         ))
         hist_vsbh_fig.add_vline(x=0, line=dict(color="#888", dash="dash", width=1))
         hist_vsbh_fig.update_layout(
-            xaxis_title="Strategy Return − B&H Return (pp)",
+            xaxis_title="Strategy P&L − B&H P&L (USD)",
             yaxis_title="Number of Tickers",
             bargap=0.05,
-            **_dark_fig_layout("Strategy vs Buy &amp; Hold Return Distribution", height=420),
+            annotations=_tail_annotations(v_lo, v_hi, v_n_lo, v_n_hi),
+            **_dark_fig_layout("Strategy vs Buy &amp; Hold P&L Distribution", height=420),
         )
-        hist_vsbh_fig.update_xaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+        hist_vsbh_fig.update_xaxes(gridcolor="#333", showgrid=True, tickprefix="$", tickformat=",.0f")
         hist_vsbh_fig.update_yaxes(gridcolor="#333", showgrid=True)
         hist_vsbh_div = hist_vsbh_fig.to_html(full_html=False, include_plotlyjs=False)
     else:

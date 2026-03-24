@@ -410,9 +410,9 @@ class ProjectQuantApp(ctk.CTk):
         self._bulk_run_btn.pack(side="left", padx=(0, 14))
 
         self._bulk_progress_label = ctk.CTkLabel(
-            self._bulk_run_row, text="", text_color="#888888",
+            self._bulk_run_row, text="", text_color="#888888", anchor="w",
         )
-        self._bulk_progress_label.pack(side="left")
+        self._bulk_progress_label.pack(side="left", padx=(4, 0))
 
         # ── Progress bar ─────────────────────────────────────────────
         self._bulk_progress_bar = ttk.Progressbar(
