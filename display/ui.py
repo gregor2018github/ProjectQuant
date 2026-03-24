@@ -1,6 +1,7 @@
 """Browser-based interactive UI for backtest results."""
 
 import html
+import math
 import statistics
 import tempfile
 import webbrowser
@@ -410,6 +411,28 @@ def _dark_fig_layout(title: str, height: int = 450, **extra) -> dict:
     return base
 
 
+def _heatmap_color_value(value: float | None) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    if value <= 0:
+        return -math.log1p(abs(max(value, -100.0)))
+    return math.log1p(value)
+
+
+def _heatmap_colorbar(max_positive_return: float) -> dict:
+    tick_candidates = [-100, -50, -20, -10, 0, 10, 20, 50, 100, 200, 500, 1000]
+    tick_values = []
+    tick_text = []
+    for value in tick_candidates:
+        if value < -100:
+            continue
+        if value > 0 and value > max_positive_return:
+            continue
+        tick_values.append(_heatmap_color_value(float(value)))
+        tick_text.append(f"{value:g}%")
+    return dict(title="Return %", tickvals=tick_values, ticktext=tick_text)
+
+
 def _build_bulk_html(result: BulkBacktestResult) -> str:
     """Assemble the full bulk backtest HTML report."""
     successful = [r for r in result.ticker_results if r.error is None]
@@ -578,18 +601,30 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
             )
         tickers_heatmap = sorted(r.ticker for r in heatmap_pool)
         ticker_yearly = {r.ticker: r.yearly_returns for r in heatmap_pool}
-        z_data = [
+        raw_z_data = [
             [ticker_yearly[t].get(y) for y in years]
             for t in tickers_heatmap
         ]
+        z_data = [
+          [_heatmap_color_value(value) for value in row]
+          for row in raw_z_data
+        ]
+        max_positive_return = max(
+          (value for row in raw_z_data for value in row if value is not None and value > 0),
+          default=100.0,
+        )
         heatmap_height = max(400, min(20 * len(tickers_heatmap) + 130, 2400))
         heatmap_fig = go.Figure(go.Heatmap(
-            z=z_data, x=years, y=tickers_heatmap,
-            colorscale="RdYlGn", zmid=0,
+          z=z_data, x=years, y=tickers_heatmap,
+          customdata=raw_z_data,
+            colorscale=[[0, "#ef5350"], [0.5, "#ffffff"], [1, "#26a69a"]],
+          zmin=_heatmap_color_value(-100.0),
+          zmax=_heatmap_color_value(max_positive_return),
+          zmid=0,
             hovertemplate=(
-                "<b>%{y}</b><br>Year: %{x}<br>Return: %{z:.2f}%<extra></extra>"
+            "<b>%{y}</b><br>Year: %{x}<br>Return: %{customdata:.2f}%<extra></extra>"
             ),
-            colorbar=dict(title="Return %", ticksuffix="%"),
+          colorbar=_heatmap_colorbar(max_positive_return),
         ))
         heatmap_fig.update_layout(
             **_dark_fig_layout(
@@ -603,6 +638,60 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
             "<p style='color:#888;padding:20px;'>Not enough data for heatmap.</p>"
         )
         heatmap_note = ""
+
+    # ── Histogram: strategy return distribution ────────────────────────
+    if successful:
+        strat_returns = [r.strategy_return_pct for r in successful]
+        hist_strat_fig = go.Figure(go.Histogram(
+            x=strat_returns,
+            xbins=dict(size=10),
+            marker=dict(
+                color=[
+                    "#26a69a" if v >= 0 else "#ef5350"
+                    for v in strat_returns
+                ],
+                line=dict(width=0.5, color="#1e1e1e"),
+            ),
+            hovertemplate="Range: %{x}<br>Count: %{y}<extra></extra>",
+        ))
+        hist_strat_fig.add_vline(x=0, line=dict(color="#888", dash="dash", width=1))
+        hist_strat_fig.update_layout(
+            xaxis_title="Strategy Return %",
+            yaxis_title="Number of Tickers",
+            bargap=0.05,
+            **_dark_fig_layout("Strategy Return Distribution", height=420),
+        )
+        hist_strat_fig.update_xaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+        hist_strat_fig.update_yaxes(gridcolor="#333", showgrid=True)
+        hist_strat_div = hist_strat_fig.to_html(full_html=False, include_plotlyjs=False)
+
+        vs_bh_returns = [r.strategy_return_pct - r.buy_hold_return_pct for r in successful]
+        hist_vsbh_fig = go.Figure(go.Histogram(
+            x=vs_bh_returns,
+            xbins=dict(size=10),
+            marker=dict(
+                color=[
+                    "#26a69a" if v >= 0 else "#ef5350"
+                    for v in vs_bh_returns
+                ],
+                line=dict(width=0.5, color="#1e1e1e"),
+            ),
+            hovertemplate="Range: %{x}<br>Count: %{y}<extra></extra>",
+        ))
+        hist_vsbh_fig.add_vline(x=0, line=dict(color="#888", dash="dash", width=1))
+        hist_vsbh_fig.update_layout(
+            xaxis_title="Strategy Return − B&H Return (pp)",
+            yaxis_title="Number of Tickers",
+            bargap=0.05,
+            **_dark_fig_layout("Strategy vs Buy &amp; Hold Return Distribution", height=420),
+        )
+        hist_vsbh_fig.update_xaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+        hist_vsbh_fig.update_yaxes(gridcolor="#333", showgrid=True)
+        hist_vsbh_div = hist_vsbh_fig.to_html(full_html=False, include_plotlyjs=False)
+    else:
+        _no_data = "<p style='color:#888;padding:20px;'>Not enough data.</p>"
+        hist_strat_div = _no_data
+        hist_vsbh_div = _no_data
 
     # ── Timeframe description ─────────────────────────────────────────
     if result.timeframe_mode == "Full history per ticker":
@@ -719,15 +808,19 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
     <button class="chart-tab-btn active" onclick="switchChart('year', this)">By Year</button>
     <button class="chart-tab-btn" onclick="switchChart('scatter', this)">Scatter</button>
     <button class="chart-tab-btn" onclick="switchChart('heatmap', this)">Heatmap</button>
+    <button class="chart-tab-btn" onclick="switchChart('hist-strat', this)">Return Distribution</button>
+    <button class="chart-tab-btn" onclick="switchChart('hist-vsbh', this)">vs B&amp;H Distribution</button>
   </div>
   <div id="chart-year">{year_div}</div>
   <div id="chart-scatter" style="display:none">{scatter_div}</div>
   <div id="chart-heatmap" style="display:none">{heatmap_note}{heatmap_div}</div>
+  <div id="chart-hist-strat" style="display:none">{hist_strat_div}</div>
+  <div id="chart-hist-vsbh" style="display:none">{hist_vsbh_div}</div>
 </div>
 
 <script>
 function switchChart(name, btn) {{
-  ['year', 'scatter', 'heatmap'].forEach(function(n) {{
+  ['year', 'scatter', 'heatmap', 'hist-strat', 'hist-vsbh'].forEach(function(n) {{
     document.getElementById('chart-' + n).style.display = (n === name) ? 'block' : 'none';
   }});
   document.querySelectorAll('.chart-tab-btn').forEach(function(b) {{
