@@ -1,4 +1,4 @@
-"""ProjectQuant — CLI entry point."""
+"""ProjectQuant — CLI & GUI entry point."""
 
 import argparse
 
@@ -11,7 +11,7 @@ from display.ui import launch_ui
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="ProjectQuant — backtest trading strategies from the terminal"
+        description="ProjectQuant — backtest trading strategies"
     )
 
     # ── data management ─────────────────────────────────────────────
@@ -54,6 +54,12 @@ def parse_args():
         "--long-window", type=int, default=200,
         help="Long SMA window (default: 200)"
     )
+
+    # ── GUI control ─────────────────────────────────────────────────
+    parser.add_argument(
+        "--no-gui", action="store_true",
+        help="Disable GUI; require CLI backtest flags instead"
+    )
     return parser.parse_args()
 
 
@@ -69,41 +75,44 @@ def main():
         download_ticker(args.download_ticker, overlap_days=args.overlap)
         return
 
-    # ── backtest mode ───────────────────────────────────────────────
-    if not args.ticker or not args.start or not args.end:
+    # ── backtest CLI mode ─────────────────────────────────────────
+    if args.ticker or args.start or args.end:
+        if not args.ticker or not args.start or not args.end:
+            raise SystemExit(
+                "Backtest mode requires --ticker, --from, and --to."
+            )
+
+        df = fetch_data(args.ticker, args.start, args.end)
+        strategy = SMACrossStrategy(
+            short_window=args.short_window,
+            long_window=args.long_window,
+        )
+        signals = strategy.generate_signals(df)
+        bt = Backtester(initial_capital=args.capital)
+        result = bt.run(df, signals)
+
+        print_report(args.ticker, args.start, args.end, args.capital, result)
+        launch_ui(
+            ticker=args.ticker,
+            start=args.start,
+            end=args.end,
+            initial_capital=args.capital,
+            result=result,
+            df=df,
+            short_window=args.short_window,
+            long_window=args.long_window,
+        )
+        return
+
+    # ── GUI mode (default) ────────────────────────────────────────
+    if args.no_gui:
         raise SystemExit(
-            "Backtest mode requires --ticker, --from, and --to.\n"
-            "Run with --download to fetch S&P 500 data first."
+            "No action specified. Use --ticker/--from/--to for backtest,\n"
+            "or --download to fetch data, or run without --no-gui for the GUI."
         )
 
-    # 1. Fetch data
-    df = fetch_data(args.ticker, args.start, args.end)
-
-    # 2. Build strategy & generate signals
-    strategy = SMACrossStrategy(
-        short_window=args.short_window,
-        long_window=args.long_window,
-    )
-    signals = strategy.generate_signals(df)
-
-    # 3. Run backtest
-    bt = Backtester(initial_capital=args.capital)
-    result = bt.run(df, signals)
-
-    # 4. Display results
-    print_report(args.ticker, args.start, args.end, args.capital, result)
-
-    # 5. Launch interactive UI
-    launch_ui(
-        ticker=args.ticker,
-        start=args.start,
-        end=args.end,
-        initial_capital=args.capital,
-        result=result,
-        df=df,
-        short_window=args.short_window,
-        long_window=args.long_window,
-    )
+    from display.desktop import launch_desktop
+    launch_desktop()
 
 
 if __name__ == "__main__":
