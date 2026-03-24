@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
@@ -165,7 +165,7 @@ def run_bulk_backtest(
     ticker_results: list[TickerResult | None] = [None] * total
     done_count = 0
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
                 _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode

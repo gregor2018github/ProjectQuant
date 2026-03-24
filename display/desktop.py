@@ -287,24 +287,35 @@ class ProjectQuantApp(ctk.CTk):
         threading.Thread(target=_execute, daemon=True).start()
 
     def _on_backtest_done(self, ticker, start, end, capital, result, df, short_window, long_window):
-        from display.ui import launch_ui
-
         self._run_btn.configure(state="normal")
         self._status_label.configure(
             text=f"Backtest complete \u2014 {len(result.trades)} trades. Opening results...",
             text_color="#26a69a",
         )
 
-        launch_ui(
-            ticker=ticker,
-            start=start,
-            end=end,
-            initial_capital=capital,
-            result=result,
-            df=df,
-            short_window=short_window,
-            long_window=long_window,
-        )
+        def _build_and_open():
+            from display.ui import launch_ui
+            try:
+                launch_ui(
+                    ticker=ticker,
+                    start=start,
+                    end=end,
+                    initial_capital=capital,
+                    result=result,
+                    df=df,
+                    short_window=short_window,
+                    long_window=long_window,
+                )
+                self.after(0, lambda: self._status_label.configure(
+                    text=f"Backtest complete \u2014 {len(result.trades)} trades. Report opened in browser.",
+                    text_color="#26a69a",
+                ))
+            except Exception as exc:
+                self.after(0, lambda msg=str(exc): self._status_label.configure(
+                    text=f"Report error: {msg}", text_color="#ef5350",
+                ))
+
+        threading.Thread(target=_build_and_open, daemon=True).start()
 
     def _on_backtest_error(self, message: str):
         self._run_btn.configure(state="normal")
