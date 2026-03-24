@@ -1,8 +1,10 @@
 """Browser-based interactive UI for backtest results."""
 
 import html
+import statistics
 import tempfile
 import webbrowser
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from engine.backtester import BacktestResult
+from engine.bulk_runner import BulkBacktestResult
 
 
 def _build_chart(
@@ -371,5 +374,399 @@ def launch_ui(
 
     # Write to a temp file and open in browser
     tmp = Path(tempfile.mktemp(suffix=".html", prefix=f"pq_{ticker}_"))
+    tmp.write_text(page_html, encoding="utf-8")
+    webbrowser.open(tmp.as_uri())
+
+
+# ── Bulk backtest report ──────────────────────────────────────────────────────
+
+def _pct_color(val: float) -> str:
+    return "#26a69a" if val >= 0 else "#ef5350"
+
+
+def _stat_card(label: str, value: str, color: str = "#fff") -> str:
+    return (
+        f'<div class="stat">'
+        f'<div class="label">{html.escape(label)}</div>'
+        f'<div class="value" style="color:{color}">{value}</div>'
+        f'</div>'
+    )
+
+
+def _dark_fig_layout(title: str, height: int = 450, **extra) -> dict:
+    base = dict(
+        title=dict(text=title, font=dict(color="#d4d4d4", size=15)),
+        height=height,
+        plot_bgcolor="#1e1e1e",
+        paper_bgcolor="#1e1e1e",
+        font=dict(color="#d4d4d4", size=12),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.01,
+            xanchor="left", x=0, bgcolor="rgba(0,0,0,0)",
+        ),
+        margin=dict(l=60, r=30, t=60, b=50),
+    )
+    base.update(extra)
+    return base
+
+
+def _build_bulk_html(result: BulkBacktestResult) -> str:
+    """Assemble the full bulk backtest HTML report."""
+    successful = [r for r in result.ticker_results if r.error is None]
+    failed = [r for r in result.ticker_results if r.error is not None]
+    total = len(result.ticker_results)
+
+    # ── Summary stats ────────────────────────────────────────────────
+    if successful:
+        strat_rets = [r.strategy_return_pct for r in successful]
+        bh_rets = [r.buy_hold_return_pct for r in successful]
+        avg_strat = statistics.mean(strat_rets)
+        med_strat = statistics.median(strat_rets)
+        avg_bh = statistics.mean(bh_rets)
+        med_bh = statistics.median(bh_rets)
+        pct_beat = sum(1 for r in successful if r.won_vs_bh) / len(successful) * 100
+        best = max(successful, key=lambda r: r.strategy_return_pct)
+        worst = min(successful, key=lambda r: r.strategy_return_pct)
+        avg_trades = statistics.mean(r.num_trades for r in successful)
+    else:
+        avg_strat = med_strat = avg_bh = med_bh = pct_beat = avg_trades = 0.0
+        best = worst = None
+
+    best_str = (f"{html.escape(best.ticker)} ({best.strategy_return_pct:+.2f}%)"
+                if best else "&mdash;")
+    worst_str = (f"{html.escape(worst.ticker)} ({worst.strategy_return_pct:+.2f}%)"
+                 if worst else "&mdash;")
+
+    summary_html = (
+        _stat_card("Tickers Run", str(total)) +
+        _stat_card("Successful", str(len(successful)), "#26a69a") +
+        _stat_card("Failed / Skipped", str(len(failed)),
+                   "#ef5350" if failed else "#888") +
+        _stat_card("Avg Strategy Return", f"{avg_strat:+.2f}%", _pct_color(avg_strat)) +
+        _stat_card("Median Strategy Return", f"{med_strat:+.2f}%", _pct_color(med_strat)) +
+        _stat_card("Avg B&amp;H Return", f"{avg_bh:+.2f}%", _pct_color(avg_bh)) +
+        _stat_card("Median B&amp;H Return", f"{med_bh:+.2f}%", _pct_color(med_bh)) +
+        _stat_card("Beat B&amp;H", f"{pct_beat:.1f}%",
+                   "#26a69a" if pct_beat >= 50 else "#ef5350") +
+        _stat_card("Best Performer", best_str, "#26a69a") +
+        _stat_card("Worst Performer", worst_str, "#ef5350") +
+        _stat_card("Avg # Trades", f"{avg_trades:.1f}")
+    )
+
+    # ── Per-ticker table rows ─────────────────────────────────────────
+    ticker_rows = ""
+    for r in sorted(result.ticker_results, key=lambda r: r.ticker):
+        if r.error:
+            ticker_rows += (
+                f'<tr class="row-error">'
+                f'<td>{html.escape(r.ticker)}</td>'
+                f'<td colspan="6" style="color:#888">{html.escape(r.error)}</td>'
+                f'</tr>\n'
+            )
+        else:
+            row_cls = "row-win" if r.won_vs_bh else "row-loss"
+            beat_icon = "&#10003;" if r.won_vs_bh else "&#10007;"
+            beat_color = "#26a69a" if r.won_vs_bh else "#ef5350"
+            ticker_rows += (
+                f'<tr class="{row_cls}">'
+                f'<td>{html.escape(r.ticker)}</td>'
+                f'<td style="font-size:11px;color:#888">'
+                f'{html.escape(r.start_date)} &rarr; {html.escape(r.end_date)}</td>'
+                f'<td style="text-align:right">{r.num_trades}</td>'
+                f'<td style="text-align:right;color:{_pct_color(r.strategy_return_pct)};'
+                f'font-weight:600">{r.strategy_return_pct:+.2f}%</td>'
+                f'<td style="text-align:right;color:{_pct_color(r.buy_hold_return_pct)}">'
+                f'{r.buy_hold_return_pct:+.2f}%</td>'
+                f'<td style="text-align:right">${r.final_value:,.2f}</td>'
+                f'<td style="text-align:center;color:{beat_color};font-weight:700">'
+                f'{beat_icon}</td>'
+                f'</tr>\n'
+            )
+
+    # ── By Year chart ─────────────────────────────────────────────────
+    year_strat_d: defaultdict[str, list[float]] = defaultdict(list)
+    year_bh_d: defaultdict[str, list[float]] = defaultdict(list)
+    for r in successful:
+        for yr, ret in r.yearly_returns.items():
+            year_strat_d[yr].append(ret)
+        for yr, ret in r.bh_yearly_returns.items():
+            year_bh_d[yr].append(ret)
+
+    years = sorted(set(year_strat_d) | set(year_bh_d))
+    avg_strat_yr = [
+        statistics.mean(year_strat_d[y]) if year_strat_d[y] else 0.0 for y in years
+    ]
+    avg_bh_yr = [
+        statistics.mean(year_bh_d[y]) if year_bh_d[y] else 0.0 for y in years
+    ]
+
+    year_fig = go.Figure()
+    year_fig.add_trace(go.Bar(
+        x=years, y=avg_strat_yr,
+        name=f"Strategy (SMA {result.short_sma}/{result.long_sma})",
+        marker_color="#26a69a",
+        hovertemplate="<b>%{x}</b><br>Avg Strategy: %{y:+.2f}%<extra></extra>",
+    ))
+    year_fig.add_trace(go.Bar(
+        x=years, y=avg_bh_yr,
+        name="Buy &amp; Hold",
+        marker_color="#2196f3",
+        hovertemplate="<b>%{x}</b><br>Avg B&H: %{y:+.2f}%<extra></extra>",
+    ))
+    year_fig.update_layout(
+        barmode="group",
+        **_dark_fig_layout("Average Annual Return by Calendar Year", height=420),
+    )
+    year_fig.update_xaxes(gridcolor="#333", showgrid=True)
+    year_fig.update_yaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+    year_div = year_fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Scatter chart ─────────────────────────────────────────────────
+    scatter_fig = go.Figure()
+    if successful:
+        all_vals = (
+            [r.buy_hold_return_pct for r in successful] +
+            [r.strategy_return_pct for r in successful]
+        )
+        v_min, v_max = min(all_vals), max(all_vals)
+        pad = (v_max - v_min) * 0.05 or 1.0
+        scatter_fig.add_trace(go.Scatter(
+            x=[v_min - pad, v_max + pad],
+            y=[v_min - pad, v_max + pad],
+            mode="lines", name="Break-even (Y=X)",
+            line=dict(color="#555", dash="dash", width=1),
+            hoverinfo="skip",
+        ))
+        scatter_fig.add_trace(go.Scatter(
+            x=[r.buy_hold_return_pct for r in successful],
+            y=[r.strategy_return_pct for r in successful],
+            mode="markers", name="Ticker",
+            marker=dict(
+                color=[r.strategy_return_pct - r.buy_hold_return_pct for r in successful],
+                colorscale="RdYlGn", size=8, cmid=0,
+                showscale=True,
+                colorbar=dict(title="Strategy vs B&H %", ticksuffix="%"),
+                line=dict(width=0.5, color="#333"),
+            ),
+            text=[r.ticker for r in successful],
+            hovertemplate=(
+                "<b>%{text}</b><br>B&H: %{x:+.2f}%<br>"
+                "Strategy: %{y:+.2f}%<extra></extra>"
+            ),
+        ))
+    scatter_fig.update_layout(
+        xaxis_title="Buy &amp; Hold Return %",
+        yaxis_title="Strategy Return %",
+        **_dark_fig_layout("Strategy Return vs Buy &amp; Hold (per ticker)", height=500),
+    )
+    scatter_fig.update_xaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+    scatter_fig.update_yaxes(gridcolor="#333", showgrid=True, ticksuffix="%")
+    scatter_div = scatter_fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Heatmap chart ─────────────────────────────────────────────────
+    _HEATMAP_MAX = 100
+    heatmap_note = ""
+    if successful and years:
+        # Sort by strategy return descending, cap at _HEATMAP_MAX for performance
+        heatmap_pool = sorted(successful, key=lambda r: r.strategy_return_pct, reverse=True)
+        if len(heatmap_pool) > _HEATMAP_MAX:
+            heatmap_pool = heatmap_pool[:_HEATMAP_MAX]
+            heatmap_note = (
+                f'<p style="color:#888;font-size:12px;margin:0 0 8px">'
+                f'Showing top {_HEATMAP_MAX} tickers by strategy return '
+                f'(out of {len(successful)} successful).</p>'
+            )
+        tickers_heatmap = sorted(r.ticker for r in heatmap_pool)
+        ticker_yearly = {r.ticker: r.yearly_returns for r in heatmap_pool}
+        z_data = [
+            [ticker_yearly[t].get(y) for y in years]
+            for t in tickers_heatmap
+        ]
+        heatmap_height = max(400, min(20 * len(tickers_heatmap) + 130, 2400))
+        heatmap_fig = go.Figure(go.Heatmap(
+            z=z_data, x=years, y=tickers_heatmap,
+            colorscale="RdYlGn", zmid=0,
+            hovertemplate=(
+                "<b>%{y}</b><br>Year: %{x}<br>Return: %{z:.2f}%<extra></extra>"
+            ),
+            colorbar=dict(title="Return %", ticksuffix="%"),
+        ))
+        heatmap_fig.update_layout(
+            **_dark_fig_layout(
+                "Annual Strategy Returns Heatmap", height=heatmap_height,
+                margin=dict(l=80, r=30, t=60, b=60),
+            ),
+        )
+        heatmap_div = heatmap_fig.to_html(full_html=False, include_plotlyjs=False)
+    else:
+        heatmap_div = (
+            "<p style='color:#888;padding:20px;'>Not enough data for heatmap.</p>"
+        )
+        heatmap_note = ""
+
+    # ── Timeframe description ─────────────────────────────────────────
+    if result.timeframe_mode == "Full history per ticker":
+        tf_desc = "Full history per ticker"
+    else:
+        tf_desc = (
+            f"{html.escape(result.custom_start)} &rarr; {html.escape(result.custom_end)}"
+        )
+
+    # ── Assemble page ─────────────────────────────────────────────────
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ProjectQuant &mdash; Bulk Backtest Results</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; padding: 24px;
+    background: #1e1e1e; color: #d4d4d4;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+  }}
+  h1 {{ margin: 0 0 4px; font-size: 24px; color: #fff; }}
+  .run-meta {{ color: #888; font-size: 12px; margin-bottom: 20px; }}
+  .summary {{
+    display: flex; flex-wrap: wrap; gap: 16px;
+    background: #252526; border: 1px solid #333;
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 16px;
+  }}
+  .stat {{ min-width: 160px; }}
+  .stat .label {{
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #888; margin-bottom: 2px;
+  }}
+  .stat .value {{ font-size: 18px; font-weight: 600; color: #fff; }}
+  .table-wrap {{
+    background: #252526; border: 1px solid #333;
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+    overflow-x: auto;
+  }}
+  .table-wrap h3 {{ margin: 0 0 12px; font-size: 15px; color: #fff; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+  th {{
+    text-align: left; padding: 8px 12px;
+    border-bottom: 2px solid #444; color: #aaa;
+    font-weight: 600; text-transform: uppercase; font-size: 11px;
+    letter-spacing: 0.03em; white-space: nowrap;
+    cursor: pointer; user-select: none;
+  }}
+  th:hover {{ color: #fff; }}
+  th.sort-asc::after {{ content: " \u25b2"; font-size: 9px; }}
+  th.sort-desc::after {{ content: " \u25bc"; font-size: 9px; }}
+  td {{ padding: 7px 12px; border-bottom: 1px solid #2e2e2e; white-space: nowrap; }}
+  tr:hover td {{ background: #2a2d2e; }}
+  .row-win {{ border-left: 3px solid #26a69a; }}
+  .row-loss {{ border-left: 3px solid #ef5350; }}
+  .row-error td {{ color: #555; font-style: italic; border-left: 3px solid #444; }}
+  .chart-section {{
+    background: #252526; border: 1px solid #333;
+    border-radius: 8px; padding: 16px;
+  }}
+  .chart-section h3 {{ margin: 0 0 12px; font-size: 15px; color: #fff; }}
+  .chart-tab-btns {{ display: flex; gap: 8px; margin-bottom: 12px; }}
+  .chart-tab-btn {{
+    background: #333; color: #aaa; border: 1px solid #444;
+    border-radius: 4px; padding: 6px 18px; cursor: pointer; font-size: 13px;
+    transition: background 0.15s;
+  }}
+  .chart-tab-btn:hover {{ background: #3a3a3a; color: #fff; }}
+  .chart-tab-btn.active {{ background: #26a69a; color: #fff; border-color: #26a69a; }}
+</style>
+</head>
+<body>
+
+<h1>Bulk Backtest Results</h1>
+<div class="run-meta">
+  Capital: ${result.initial_capital:,.2f} &nbsp;|&nbsp;
+  SMA {result.short_sma}/{result.long_sma} &nbsp;|&nbsp;
+  Timeframe: {tf_desc} &nbsp;|&nbsp;
+  Run at: {html.escape(result.timestamp)}
+</div>
+
+<!-- Summary -->
+<div class="summary">
+  {summary_html}
+</div>
+
+<!-- Per-ticker table -->
+<div class="table-wrap">
+  <h3>Results per Ticker <span style="color:#888;font-size:12px;font-weight:400">(click column header to sort)</span></h3>
+  <table id="tickerTable">
+    <thead>
+      <tr>
+        <th onclick="sortTable(0)">Ticker</th>
+        <th onclick="sortTable(1)">Period</th>
+        <th onclick="sortTable(2)" style="text-align:right"># Trades</th>
+        <th onclick="sortTable(3)" style="text-align:right">Strategy Return</th>
+        <th onclick="sortTable(4)" style="text-align:right">B&amp;H Return</th>
+        <th onclick="sortTable(5)" style="text-align:right">Final Value</th>
+        <th onclick="sortTable(6)" style="text-align:center">Beat B&amp;H</th>
+      </tr>
+    </thead>
+    <tbody>
+{ticker_rows}    </tbody>
+  </table>
+</div>
+
+<!-- Charts -->
+<div class="chart-section">
+  <h3>Analysis Charts</h3>
+  <div class="chart-tab-btns">
+    <button class="chart-tab-btn active" onclick="switchChart('year', this)">By Year</button>
+    <button class="chart-tab-btn" onclick="switchChart('scatter', this)">Scatter</button>
+    <button class="chart-tab-btn" onclick="switchChart('heatmap', this)">Heatmap</button>
+  </div>
+  <div id="chart-year">{year_div}</div>
+  <div id="chart-scatter" style="display:none">{scatter_div}</div>
+  <div id="chart-heatmap" style="display:none">{heatmap_note}{heatmap_div}</div>
+</div>
+
+<script>
+function switchChart(name, btn) {{
+  ['year', 'scatter', 'heatmap'].forEach(function(n) {{
+    document.getElementById('chart-' + n).style.display = (n === name) ? 'block' : 'none';
+  }});
+  document.querySelectorAll('.chart-tab-btn').forEach(function(b) {{
+    b.classList.remove('active');
+  }});
+  btn.classList.add('active');
+}}
+
+var _sortState = {{col: -1, asc: true}};
+function sortTable(col) {{
+  var table = document.getElementById('tickerTable');
+  var tbody = table.querySelector('tbody');
+  var rows = Array.from(tbody.querySelectorAll('tr'));
+  var asc = (_sortState.col === col) ? !_sortState.asc : true;
+  _sortState = {{col: col, asc: asc}};
+  table.querySelectorAll('th').forEach(function(th, i) {{
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (i === col) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+  }});
+  rows.sort(function(a, b) {{
+    var aCell = a.cells[col] ? a.cells[col].innerText.trim() : '';
+    var bCell = b.cells[col] ? b.cells[col].innerText.trim() : '';
+    var aNum = parseFloat(aCell.replace(/[$%+,\u2713\u2717]/g, ''));
+    var bNum = parseFloat(bCell.replace(/[$%+,\u2713\u2717]/g, ''));
+    var cmp = (!isNaN(aNum) && !isNaN(bNum)) ? aNum - bNum : aCell.localeCompare(bCell);
+    return asc ? cmp : -cmp;
+  }});
+  rows.forEach(function(r) {{ tbody.appendChild(r); }});
+}}
+</script>
+
+</body>
+</html>"""
+    return page
+
+
+def launch_bulk_ui(result: BulkBacktestResult) -> None:
+    """Build the bulk results interactive report and open it in the default browser."""
+    page_html = _build_bulk_html(result)
+    tmp = Path(tempfile.mktemp(suffix=".html", prefix="pq_bulk_"))
     tmp.write_text(page_html, encoding="utf-8")
     webbrowser.open(tmp.as_uri())

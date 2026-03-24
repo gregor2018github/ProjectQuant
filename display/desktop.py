@@ -110,47 +110,12 @@ class ProjectQuantApp(ctk.CTk):
 
         self._tree.bind("<<TreeviewSelect>>", self._on_row_select)
 
-        # Backtest controls
-        controls_frame = ctk.CTkFrame(self)
-        controls_frame.pack(fill="x", padx=20, pady=(0, 16))
+        # ── Tab view: Single Test / Bulk Test ──────────────────────
+        self._ctrl_tabs = ctk.CTkTabview(self)
+        self._ctrl_tabs.pack(fill="x", padx=20, pady=(0, 16))
 
-        controls_label = ctk.CTkLabel(
-            controls_frame, text="Run Backtest",
-            font=ctk.CTkFont(size=15, weight="bold"),
-        )
-        controls_label.grid(row=0, column=0, columnspan=8, padx=12, pady=(12, 8), sticky="w")
-
-        # Row of inputs
-        labels = ["Ticker", "From", "To", "Capital", "Short SMA", "Long SMA"]
-        defaults = ["", "", "", "10000", "50", "200"]
-        placeholders = ["AAPL", "YYYY-MM-DD", "YYYY-MM-DD", "10000", "50", "200"]
-        widths = [100, 130, 130, 100, 80, 80]
-        self._bt_entries: dict[str, ctk.CTkEntry] = {}
-
-        for i, (label, default, ph, w) in enumerate(zip(labels, defaults, placeholders, widths)):
-            ctk.CTkLabel(controls_frame, text=label + ":").grid(
-                row=1, column=i * 2, padx=(12 if i == 0 else 4, 2), pady=(0, 12), sticky="e",
-            )
-            entry = ctk.CTkEntry(controls_frame, width=w, placeholder_text=ph)
-            if default:
-                entry.insert(0, default)
-            entry.grid(row=1, column=i * 2 + 1, padx=(0, 8), pady=(0, 12))
-            self._bt_entries[label] = entry
-
-        self._run_btn = ctk.CTkButton(
-            controls_frame, text="Run Backtest", width=130,
-            fg_color="#26a69a", hover_color="#1e8c82",
-            command=self._run_backtest,
-        )
-        self._run_btn.grid(row=1, column=len(labels) * 2, padx=(8, 12), pady=(0, 12))
-
-        self._status_label = ctk.CTkLabel(
-            controls_frame, text="", text_color="#888888",
-        )
-        self._status_label.grid(
-            row=2, column=0, columnspan=len(labels) * 2 + 1,
-            padx=12, pady=(0, 8), sticky="w",
-        )
+        self._build_single_test_tab(self._ctrl_tabs.add("Single Test"))
+        self._build_bulk_test_tab(self._ctrl_tabs.add("Bulk Test"))
 
     def _style_treeview(self):
         style = ttk.Style()
@@ -179,6 +144,13 @@ class ProjectQuantApp(ctk.CTk):
         style.map(
             "Treeview.Heading",
             background=[("active", "#444444")],
+        )
+        style.configure(
+            "Horizontal.TProgressbar",
+            background="#26a69a",
+            troughcolor="#333333",
+            borderwidth=0,
+            thickness=8,
         )
 
     # ── Data loading ─────────────────────────────────────────────────
@@ -337,6 +309,234 @@ class ProjectQuantApp(ctk.CTk):
     def _on_backtest_error(self, message: str):
         self._run_btn.configure(state="normal")
         self._status_label.configure(text=f"Error: {message}", text_color="#ef5350")
+
+    # ── Tab builders ─────────────────────────────────────────────────
+
+    def _build_single_test_tab(self, tab: ctk.CTkFrame):
+        """Recreate the single-ticker backtest controls inside *tab*."""
+        ctk.CTkLabel(
+            tab, text="Run Backtest",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).grid(row=0, column=0, columnspan=14, padx=12, pady=(12, 8), sticky="w")
+
+        labels = ["Ticker", "From", "To", "Capital", "Short SMA", "Long SMA"]
+        defaults = ["", "", "", "10000", "50", "200"]
+        placeholders = ["AAPL", "YYYY-MM-DD", "YYYY-MM-DD", "10000", "50", "200"]
+        widths = [100, 130, 130, 100, 80, 80]
+        self._bt_entries: dict[str, ctk.CTkEntry] = {}
+
+        for i, (label, default, ph, w) in enumerate(zip(labels, defaults, placeholders, widths)):
+            ctk.CTkLabel(tab, text=label + ":").grid(
+                row=1, column=i * 2, padx=(12 if i == 0 else 4, 2), pady=(0, 12), sticky="e",
+            )
+            entry = ctk.CTkEntry(tab, width=w, placeholder_text=ph)
+            if default:
+                entry.insert(0, default)
+            entry.grid(row=1, column=i * 2 + 1, padx=(0, 8), pady=(0, 12))
+            self._bt_entries[label] = entry
+
+        self._run_btn = ctk.CTkButton(
+            tab, text="Run Backtest", width=130,
+            fg_color="#26a69a", hover_color="#1e8c82",
+            command=self._run_backtest,
+        )
+        self._run_btn.grid(row=1, column=len(labels) * 2, padx=(8, 12), pady=(0, 12))
+
+        self._status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
+        self._status_label.grid(
+            row=2, column=0, columnspan=len(labels) * 2 + 1,
+            padx=12, pady=(0, 8), sticky="w",
+        )
+
+    def _build_bulk_test_tab(self, tab: ctk.CTkFrame):
+        """Build bulk backtest controls inside *tab*."""
+        ctk.CTkLabel(
+            tab, text="Run Bulk Backtest",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        # ── Param row ────────────────────────────────────────────────
+        param_row = ctk.CTkFrame(tab, fg_color="transparent")
+        param_row.pack(fill="x", padx=12, pady=(0, 4))
+
+        self._bulk_entries: dict[str, ctk.CTkEntry] = {}
+        for label, default, width in [
+            ("Capital", "10000", 100),
+            ("Short SMA", "50", 80),
+            ("Long SMA", "200", 80),
+        ]:
+            ctk.CTkLabel(param_row, text=label + ":").pack(side="left", padx=(0, 2))
+            entry = ctk.CTkEntry(param_row, width=width)
+            entry.insert(0, default)
+            entry.pack(side="left", padx=(0, 14))
+            self._bulk_entries[label] = entry
+
+        ctk.CTkLabel(param_row, text="Mode:").pack(side="left", padx=(0, 2))
+        self._bulk_mode_var = ctk.StringVar(value="Custom date range")
+        ctk.CTkComboBox(
+            param_row,
+            values=["Custom date range", "Full history per ticker"],
+            variable=self._bulk_mode_var,
+            width=210,
+            state="readonly",
+            command=self._on_bulk_mode_change,
+        ).pack(side="left", padx=(0, 8))
+
+        # ── Date row (toggled by mode selection) ─────────────────────
+        self._bulk_date_row = ctk.CTkFrame(tab, fg_color="transparent")
+        self._bulk_date_row.pack(fill="x", padx=12, pady=(0, 4))
+
+        ctk.CTkLabel(self._bulk_date_row, text="From:").pack(side="left", padx=(0, 2))
+        self._bulk_from_entry = ctk.CTkEntry(
+            self._bulk_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        )
+        self._bulk_from_entry.pack(side="left", padx=(0, 14))
+
+        ctk.CTkLabel(self._bulk_date_row, text="To:").pack(side="left", padx=(0, 2))
+        self._bulk_to_entry = ctk.CTkEntry(
+            self._bulk_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        )
+        self._bulk_to_entry.pack(side="left")
+
+        # ── Run row ──────────────────────────────────────────────────
+        self._bulk_run_row = ctk.CTkFrame(tab, fg_color="transparent")
+        self._bulk_run_row.pack(fill="x", padx=12, pady=(4, 4))
+
+        self._bulk_run_btn = ctk.CTkButton(
+            self._bulk_run_row, text="Run All Tickers", width=150,
+            fg_color="#ff9800", hover_color="#c77800",
+            command=self._run_bulk_backtest,
+        )
+        self._bulk_run_btn.pack(side="left", padx=(0, 14))
+
+        self._bulk_progress_label = ctk.CTkLabel(
+            self._bulk_run_row, text="", text_color="#888888",
+        )
+        self._bulk_progress_label.pack(side="left")
+
+        # ── Progress bar ─────────────────────────────────────────────
+        self._bulk_progress_bar = ttk.Progressbar(
+            tab, orient="horizontal", mode="determinate",
+        )
+        self._bulk_progress_bar.pack(fill="x", padx=12, pady=(2, 4))
+
+        # ── Status ───────────────────────────────────────────────────
+        self._bulk_status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
+        self._bulk_status_label.pack(anchor="w", padx=12, pady=(0, 8))
+
+    # ── Bulk mode toggle ──────────────────────────────────────────────
+
+    def _on_bulk_mode_change(self, _=None):
+        if self._bulk_mode_var.get() == "Full history per ticker":
+            self._bulk_date_row.pack_forget()
+        else:
+            self._bulk_date_row.pack(
+                fill="x", padx=12, pady=(0, 4),
+                before=self._bulk_run_row,
+            )
+
+    # ── Bulk backtest execution ───────────────────────────────────────
+
+    def _run_bulk_backtest(self):
+        capital_str = self._bulk_entries["Capital"].get().strip()
+        short_str = self._bulk_entries["Short SMA"].get().strip()
+        long_str = self._bulk_entries["Long SMA"].get().strip()
+        mode = self._bulk_mode_var.get()
+
+        try:
+            capital = float(capital_str) if capital_str else 10_000.0
+            short_window = int(short_str) if short_str else 50
+            long_window = int(long_str) if long_str else 200
+        except ValueError:
+            self._bulk_status_label.configure(
+                text="Invalid numeric input.", text_color="#ef5350",
+            )
+            return
+
+        start: str | None = None
+        end: str | None = None
+        if mode == "Custom date range":
+            start = self._bulk_from_entry.get().strip()
+            end = self._bulk_to_entry.get().strip()
+            if not start or not end:
+                self._bulk_status_label.configure(
+                    text="From and To dates are required for Custom date range.",
+                    text_color="#ef5350",
+                )
+                return
+
+        if not self._datasets:
+            self._bulk_status_label.configure(
+                text="No datasets loaded. Click Refresh first.", text_color="#ef5350",
+            )
+            return
+
+        total = len(self._datasets)
+        self._bulk_run_btn.configure(state="disabled")
+        self._bulk_progress_bar.configure(maximum=total, value=0)
+        self._bulk_progress_label.configure(text=f"0 / {total}")
+        self._bulk_status_label.configure(
+            text=f"Running bulk backtest on {total} tickers...", text_color="#888888",
+        )
+
+        datasets_snapshot = list(self._datasets)
+
+        def _progress_cb(done: int, tot: int, ticker: str):
+            self.after(0, lambda d=done, t=tot, tk=ticker: self._on_bulk_progress(d, t, tk))
+
+        def _execute():
+            try:
+                from engine.bulk_runner import run_bulk_backtest
+                result = run_bulk_backtest(
+                    datasets=datasets_snapshot,
+                    start=start,
+                    end=end,
+                    capital=capital,
+                    short_sma=short_window,
+                    long_sma=long_window,
+                    timeframe_mode=mode,
+                    workers=8,
+                    progress_cb=_progress_cb,
+                )
+                self.after(0, lambda: self._on_bulk_done(result))
+            except Exception as exc:
+                self.after(0, lambda: self._on_bulk_error(str(exc)))
+
+        threading.Thread(target=_execute, daemon=True).start()
+
+    def _on_bulk_progress(self, done: int, total: int, ticker: str):
+        self._bulk_progress_bar.configure(value=done)
+        self._bulk_progress_label.configure(text=f"Running {ticker} \u2014 {done} / {total}")
+
+    def _on_bulk_done(self, result):
+        self._bulk_run_btn.configure(state="normal")
+        successful = sum(1 for r in result.ticker_results if r.error is None)
+        n = len(result.ticker_results)
+        self._bulk_progress_bar.configure(value=n)
+        self._bulk_progress_label.configure(text=f"{n} / {n}")
+        self._bulk_status_label.configure(
+            text=f"Complete \u2014 {successful}/{n} succeeded. Building report...",
+            text_color="#26a69a",
+        )
+
+        def _build_and_open():
+            from display.ui import launch_bulk_ui
+            try:
+                launch_bulk_ui(result)
+                self.after(0, lambda: self._bulk_status_label.configure(
+                    text=f"Complete \u2014 {successful}/{n} succeeded. Report opened in browser.",
+                    text_color="#26a69a",
+                ))
+            except Exception as exc:
+                self.after(0, lambda msg=str(exc): self._bulk_status_label.configure(
+                    text=f"Report error: {msg}", text_color="#ef5350",
+                ))
+
+        threading.Thread(target=_build_and_open, daemon=True).start()
+
+    def _on_bulk_error(self, message: str):
+        self._bulk_run_btn.configure(state="normal")
+        self._bulk_status_label.configure(text=f"Error: {message}", text_color="#ef5350")
 
 
 def launch_desktop():
