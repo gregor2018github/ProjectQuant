@@ -5,6 +5,7 @@ from pathlib import Path
 
 from data.fetcher import CACHE_DIR
 from data.sp500 import get_sp500_tickers
+from data.dax30 import get_dax30_tickers
 
 
 @dataclass
@@ -34,6 +35,7 @@ def scan_cache() -> list[DatasetInfo]:
     loaded.
     """
     sp500_set = set(get_sp500_tickers())
+    dax30_set = set(get_dax30_tickers())
     results: list[DatasetInfo] = []
 
     for csv_path in sorted(CACHE_DIR.glob("*.csv")):
@@ -64,7 +66,12 @@ def scan_cache() -> list[DatasetInfo]:
         except Exception:
             continue
 
-        index_name = "S&P 500" if ticker in sp500_set else "Other"
+        if ticker in sp500_set:
+            index_name = "S&P 500"
+        elif ticker in dax30_set:
+            index_name = "DAX 30"
+        else:
+            index_name = "Other"
         results.append(DatasetInfo(
             ticker=ticker,
             rows=row_count,

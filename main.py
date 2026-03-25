@@ -2,7 +2,7 @@
 
 import argparse
 
-from data.fetcher import fetch_data, download_ticker, download_sp500
+from data.fetcher import fetch_data, download_ticker, download_sp500, download_dax30
 from strategies.sma_cross import SMACrossStrategy
 from engine.backtester import Backtester
 from display.report import print_report
@@ -18,6 +18,10 @@ def parse_args():
     parser.add_argument(
         "--download", action="store_true",
         help="Download / refresh S&P 500 data and exit"
+    )
+    parser.add_argument(
+        "--download-dax", action="store_true",
+        help="Download / refresh DAX 30 data and exit"
     )
     parser.add_argument(
         "--download-ticker",
@@ -69,6 +73,10 @@ def main():
     # ── download mode ───────────────────────────────────────────────
     if args.download:
         download_sp500(delay=args.delay, overlap_days=args.overlap)
+        return
+
+    if args.download_dax:
+        download_dax30(delay=args.delay, overlap_days=args.overlap)
         return
 
     if args.download_ticker:

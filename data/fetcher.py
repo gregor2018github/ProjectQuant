@@ -14,6 +14,7 @@ import pandas as pd
 import yfinance as yf
 
 from data.sp500 import get_sp500_tickers
+from data.dax30 import get_dax30_tickers
 
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,3 +156,32 @@ def download_sp500(
     print(f"\n[sp500] Done. {total - len(failed)}/{total} succeeded.")
     if failed:
         print(f"[sp500] Failed: {', '.join(failed)}")
+
+
+def download_dax30(
+    delay: float = _REQUEST_DELAY,
+    overlap_days: int = _OVERLAP_DAYS,
+) -> None:
+    """Download / refresh data for every current DAX 30 constituent.
+
+    Pauses *delay* seconds between API calls to avoid rate-limiting.
+    """
+    tickers = get_dax30_tickers()
+    total = len(tickers)
+    print(f"[dax30] Downloading {total} tickers (delay={delay}s) …\n")
+
+    failed: list[str] = []
+    for i, ticker in enumerate(tickers, 1):
+        print(f"({i}/{total}) ", end="")
+        try:
+            download_ticker(ticker, overlap_days=overlap_days)
+        except Exception as exc:
+            print(f"[error] {ticker}: {exc}")
+            failed.append(ticker)
+
+        if i < total:
+            time.sleep(delay)
+
+    print(f"\n[dax30] Done. {total - len(failed)}/{total} succeeded.")
+    if failed:
+        print(f"[dax30] Failed: {', '.join(failed)}")

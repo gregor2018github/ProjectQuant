@@ -61,7 +61,7 @@ class ProjectQuantApp(ctk.CTk):
 
         self._index_var = ctk.StringVar(value="All")
         index_combo = ctk.CTkComboBox(
-            filter_frame, values=["All", "S&P 500", "Other"],
+            filter_frame, values=["All", "S&P 500", "DAX 30", "Other"],
             variable=self._index_var, width=140, state="readonly",
             command=lambda _: self._apply_filter(),
         )
