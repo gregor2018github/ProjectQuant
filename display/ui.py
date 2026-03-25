@@ -199,6 +199,8 @@ def _build_html(
     trade_rows = ""
     for i, t in enumerate(result.trades, 1):
         pnl_color = "#26a69a" if t.pnl >= 0 else "#ef5350"
+        vs_bh_diff = t.capital_end - t.bh_capital_end
+        vs_bh_color = "#26a69a" if vs_bh_diff >= 0 else "#ef5350"
         trade_rows += f"""
         <tr>
             <td>{i}</td>
@@ -211,6 +213,7 @@ def _build_html(
             <td>${t.investment:,.2f}</td>
             <td>${t.capital_end:,.2f}</td>
             <td>${t.bh_capital_end:,.2f}</td>
+            <td style="color:{vs_bh_color};font-weight:600">${vs_bh_diff:+,.2f}</td>
             <td style="color:{pnl_color};font-weight:600">${t.pnl:,.2f}</td>
         </tr>"""
 
@@ -317,6 +320,12 @@ def _build_html(
   </div>
 </div>
 
+<!-- Chart -->
+<div class="chart-wrap">
+  <h3>Price Chart</h3>
+  {chart_div}
+</div>
+
 <!-- Trade Log -->
 <div class="table-wrap">
   <h3>Trade Log</h3>
@@ -326,17 +335,11 @@ def _build_html(
       <tr>
         <th>#</th><th>Entry Date</th><th>Entry Price</th>
         <th>Exit Date</th><th>Exit Price</th><th>Shares</th>
-        <th>Capital Start</th><th>Investment</th><th>Capital End</th><th>B&amp;H Capital End</th><th>P&amp;L</th>
+        <th>Capital Start</th><th>Investment</th><th>Capital End</th><th>B&amp;H Capital End</th><th>vs B&amp;H</th><th>P&amp;L</th>
       </tr>
     </thead>
     <tbody>{trade_rows}</tbody>
   </table>'''}
-</div>
-
-<!-- Chart -->
-<div class="chart-wrap">
-  <h3>Price Chart</h3>
-  {chart_div}
 </div>
 
 </body>
@@ -490,6 +493,8 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
             row_cls = "row-win" if r.won_vs_bh else "row-loss"
             beat_icon = "&#10003;" if r.won_vs_bh else "&#10007;"
             beat_color = "#26a69a" if r.won_vs_bh else "#ef5350"
+            vs_bh_diff = r.final_value - r.buy_hold_final_value
+            vs_bh_diff_color = "#26a69a" if vs_bh_diff >= 0 else "#ef5350"
             ticker_rows += (
                 f'<tr class="{row_cls}">'
                 f'<td>{html.escape(r.ticker)}</td>'
@@ -501,6 +506,8 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
                 f'<td style="text-align:right;color:{_pct_color(r.buy_hold_return_pct)}">'
                 f'{r.buy_hold_return_pct:+.2f}%</td>'
                 f'<td style="text-align:right">${r.final_value:,.2f}</td>'
+                f'<td style="text-align:right;color:{vs_bh_diff_color};font-weight:600">'
+                f'${vs_bh_diff:+,.2f}</td>'
                 f'<td style="text-align:center;color:{beat_color};font-weight:700">'
                 f'{beat_icon}</td>'
                 f'</tr>\n'
@@ -844,26 +851,6 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
   {summary_html}
 </div>
 
-<!-- Per-ticker table -->
-<div class="table-wrap">
-  <h3>Results per Ticker <span style="color:#888;font-size:12px;font-weight:400">(click column header to sort)</span></h3>
-  <table id="tickerTable">
-    <thead>
-      <tr>
-        <th onclick="sortTable(0)">Ticker</th>
-        <th onclick="sortTable(1)">Period</th>
-        <th onclick="sortTable(2)" style="text-align:right"># Trades</th>
-        <th onclick="sortTable(3)" style="text-align:right">Strategy Return</th>
-        <th onclick="sortTable(4)" style="text-align:right">B&amp;H Return</th>
-        <th onclick="sortTable(5)" style="text-align:right">Final Value</th>
-        <th onclick="sortTable(6)" style="text-align:center">Beat B&amp;H</th>
-      </tr>
-    </thead>
-    <tbody>
-{ticker_rows}    </tbody>
-  </table>
-</div>
-
 <!-- Charts -->
 <div class="chart-section">
   <h3>Analysis Charts</h3>
@@ -879,6 +866,27 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
   <div id="chart-heatmap" style="display:none">{heatmap_note}{heatmap_div}</div>
   <div id="chart-hist-strat" style="display:none">{hist_strat_div}</div>
   <div id="chart-hist-vsbh" style="display:none">{hist_vsbh_div}</div>
+</div>
+
+<!-- Per-ticker table -->
+<div class="table-wrap" style="margin-top:16px">
+  <h3>Results per Ticker <span style="color:#888;font-size:12px;font-weight:400">(click column header to sort)</span></h3>
+  <table id="tickerTable">
+    <thead>
+      <tr>
+        <th onclick="sortTable(0)">Ticker</th>
+        <th onclick="sortTable(1)">Period</th>
+        <th onclick="sortTable(2)" style="text-align:right"># Trades</th>
+        <th onclick="sortTable(3)" style="text-align:right">Strategy Return</th>
+        <th onclick="sortTable(4)" style="text-align:right">B&amp;H Return</th>
+        <th onclick="sortTable(5)" style="text-align:right">Final Value</th>
+        <th onclick="sortTable(6)" style="text-align:right">vs B&amp;H ($)</th>
+        <th onclick="sortTable(7)" style="text-align:center">Beat B&amp;H</th>
+      </tr>
+    </thead>
+    <tbody>
+{ticker_rows}    </tbody>
+  </table>
 </div>
 
 <script>
