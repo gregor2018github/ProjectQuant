@@ -467,9 +467,9 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
                    "#ef5350" if failed else "#888") +
         _stat_card("Avg Strategy Return", f"{avg_strat:+.2f}%", _pct_color(avg_strat)) +
         _stat_card("Median Strategy Return", f"{med_strat:+.2f}%", _pct_color(med_strat)) +
-        _stat_card("Avg B&amp;H Return", f"{avg_bh:+.2f}%", _pct_color(avg_bh)) +
-        _stat_card("Median B&amp;H Return", f"{med_bh:+.2f}%", _pct_color(med_bh)) +
-        _stat_card("Beat B&amp;H", f"{pct_beat:.1f}%",
+        _stat_card("Avg B&H Return", f"{avg_bh:+.2f}%", _pct_color(avg_bh)) +
+        _stat_card("Median B&H Return", f"{med_bh:+.2f}%", _pct_color(med_bh)) +
+        _stat_card("Beat B&H", f"{pct_beat:.1f}%",
                    "#26a69a" if pct_beat >= 50 else "#ef5350") +
         _stat_card("Best Performer", best_str, "#26a69a") +
         _stat_card("Worst Performer", worst_str, "#ef5350") +
@@ -714,20 +714,37 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
         vs_bh_pnl = [r.final_value - r.buy_hold_final_value for r in successful]
         vsbh_clipped, v_lo, v_hi, v_n_lo, v_n_hi = _clip_tails(vs_bh_pnl)
         bin_size_vsbh = _auto_bin_size(vsbh_clipped)
-        hist_vsbh_fig = go.Figure(go.Histogram(
-            x=vsbh_clipped,
-            xbins=dict(size=bin_size_vsbh),
-            marker=dict(
-                color=["#26a69a" if v >= 0 else "#ef5350" for v in vsbh_clipped],
-                line=dict(width=0.5, color="#1e1e1e"),
-            ),
-            hovertemplate="Edge: $%{x:,.0f}<br>Count: %{y}<extra></extra>",
-        ))
+        # Build bins aligned to 0 so negative/positive never share a bin
+        _bin_start = math.floor(min(vsbh_clipped) / bin_size_vsbh) * bin_size_vsbh
+        _bin_end = math.ceil(max(vsbh_clipped) / bin_size_vsbh) * bin_size_vsbh
+        _bins = np.arange(_bin_start, _bin_end + bin_size_vsbh * 0.5, bin_size_vsbh)
+        _centers = (_bins[:-1] + _bins[1:]) / 2
+        vsbh_neg = [v for v in vsbh_clipped if v < 0]
+        vsbh_pos = [v for v in vsbh_clipped if v >= 0]
+        hist_vsbh_fig = go.Figure()
+        for _vals, _color, _name in [
+            (vsbh_neg, "#ef5350", "Underperforms B&H"),
+            (vsbh_pos, "#26a69a", "Outperforms B&H"),
+        ]:
+            _counts, _ = np.histogram(_vals, bins=_bins)
+            _hover = [
+                f"${_lo:,.0f} – ${_hi:,.0f}<br>Count: {_c}"
+                for _lo, _hi, _c in zip(_bins[:-1], _bins[1:], _counts)
+            ]
+            hist_vsbh_fig.add_trace(go.Bar(
+                x=_centers,
+                y=_counts,
+                width=bin_size_vsbh,
+                marker=dict(color=_color, line=dict(width=0.5, color="#1e1e1e")),
+                name=_name,
+                hovertext=_hover,
+                hovertemplate="%{hovertext}<extra></extra>",
+            ))
         hist_vsbh_fig.add_vline(x=0, line=dict(color="#888", dash="dash", width=1))
         hist_vsbh_fig.update_layout(
             xaxis_title="Strategy P&L − B&H P&L (USD)",
             yaxis_title="Number of Tickers",
-            bargap=0.05,
+            barmode="overlay",
             annotations=_tail_annotations(v_lo, v_hi, v_n_lo, v_n_hi),
             **_dark_fig_layout("Strategy vs Buy &amp; Hold P&L Distribution", height=420),
         )
