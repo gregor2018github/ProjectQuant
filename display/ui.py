@@ -450,12 +450,14 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
         med_strat = statistics.median(strat_rets)
         avg_bh = statistics.mean(bh_rets)
         med_bh = statistics.median(bh_rets)
-        pct_beat = sum(1 for r in successful if r.won_vs_bh) / len(successful) * 100
+        beat_count = sum(1 for r in successful if r.won_vs_bh)
+        pct_beat = beat_count / len(successful) * 100
         best = max(successful, key=lambda r: r.strategy_return_pct)
         worst = min(successful, key=lambda r: r.strategy_return_pct)
         avg_trades = statistics.mean(r.num_trades for r in successful)
     else:
         avg_strat = med_strat = avg_bh = med_bh = pct_beat = avg_trades = 0.0
+        beat_count = 0
         best = worst = None
 
     best_str = (f"{html.escape(best.ticker)} ({best.strategy_return_pct:+.2f}%)"
@@ -472,7 +474,7 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
         _stat_card("Median Strategy Return", f"{med_strat:+.2f}%", _pct_color(med_strat)) +
         _stat_card("Avg B&H Return", f"{avg_bh:+.2f}%", _pct_color(avg_bh)) +
         _stat_card("Median B&H Return", f"{med_bh:+.2f}%", _pct_color(med_bh)) +
-        _stat_card("Beat B&H", f"{pct_beat:.1f}%",
+        _stat_card("Beat B&H", f"{pct_beat:.1f}%  ({beat_count} / {len(successful)})",
                    "#26a69a" if pct_beat >= 50 else "#ef5350") +
         _stat_card("Best Performer", best_str, "#26a69a") +
         _stat_card("Worst Performer", worst_str, "#ef5350") +

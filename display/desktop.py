@@ -240,6 +240,23 @@ class ProjectQuantApp(ctk.CTk):
 
     # ── Backtest execution ───────────────────────────────────────────
 
+    def _use_full_date_range(self):
+        ticker = self._bt_entries["Ticker"].get().strip().upper()
+        if not ticker:
+            self._status_label.configure(text="Enter a ticker first.", text_color="#ef5350")
+            return
+        match = next((d for d in self._datasets if d.ticker.upper() == ticker), None)
+        if match is None:
+            self._status_label.configure(
+                text=f"Ticker '{ticker}' not found in loaded datasets.", text_color="#ef5350",
+            )
+            return
+        self._bt_entries["From"].delete(0, "end")
+        self._bt_entries["From"].insert(0, match.first_date)
+        self._bt_entries["To"].delete(0, "end")
+        self._bt_entries["To"].insert(0, match.last_date)
+        self._status_label.configure(text="", text_color="#888888")
+
     def _run_backtest(self):
         ticker = self._bt_entries["Ticker"].get().strip()
         start = self._bt_entries["From"].get().strip()
@@ -351,11 +368,18 @@ class ProjectQuantApp(ctk.CTk):
             fg_color="#26a69a", hover_color="#1e8c82",
             command=self._run_backtest,
         )
-        self._run_btn.grid(row=1, column=len(labels) * 2, padx=(8, 12), pady=(0, 12))
+        self._run_btn.grid(row=1, column=len(labels) * 2, padx=(8, 4), pady=(0, 12))
+
+        self._full_range_btn = ctk.CTkButton(
+            tab, text="Full Range", width=100,
+            fg_color="#555", hover_color="#444",
+            command=self._use_full_date_range,
+        )
+        self._full_range_btn.grid(row=1, column=len(labels) * 2 + 1, padx=(0, 12), pady=(0, 12))
 
         self._status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
         self._status_label.grid(
-            row=2, column=0, columnspan=len(labels) * 2 + 1,
+            row=2, column=0, columnspan=len(labels) * 2 + 2,
             padx=12, pady=(0, 8), sticky="w",
         )
 
