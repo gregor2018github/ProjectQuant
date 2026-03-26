@@ -116,6 +116,7 @@ class ProjectQuantApp(ctk.CTk):
 
         self._build_single_test_tab(self._ctrl_tabs.add("Single Test"))
         self._build_bulk_test_tab(self._ctrl_tabs.add("Bulk Test"))
+        self._build_matrix_test_tab(self._ctrl_tabs.add("Matrix Test"))
 
     def _style_treeview(self):
         style = ttk.Style()
@@ -572,6 +573,218 @@ class ProjectQuantApp(ctk.CTk):
     def _on_bulk_error(self, message: str):
         self._bulk_run_btn.configure(state="normal")
         self._bulk_status_label.configure(text=f"Error: {message}", text_color="#ef5350")
+
+    # ── Matrix Test tab ───────────────────────────────────────────────
+
+    def _build_matrix_test_tab(self, tab: ctk.CTkFrame):
+        """Build matrix test controls inside *tab*."""
+        ctk.CTkLabel(
+            tab, text="Run Matrix Test",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        # ── Param row ────────────────────────────────────────────────
+        param_row = ctk.CTkFrame(tab, fg_color="transparent")
+        param_row.pack(fill="x", padx=12, pady=(0, 4))
+
+        self._matrix_entries: dict[str, ctk.CTkEntry] = {}
+        for label, default, width in [
+            ("Assets per Test", "30", 70),
+            ("SMA From", "3", 60),
+            ("SMA To", "200", 60),
+            ("Max Combinations", "150", 70),
+            ("Capital", "10000", 100),
+        ]:
+            ctk.CTkLabel(param_row, text=label + ":").pack(side="left", padx=(0, 2))
+            entry = ctk.CTkEntry(param_row, width=width)
+            entry.insert(0, default)
+            entry.pack(side="left", padx=(0, 14))
+            self._matrix_entries[label] = entry
+
+        ctk.CTkLabel(param_row, text="Mode:").pack(side="left", padx=(0, 2))
+        self._matrix_mode_var = ctk.StringVar(value="Full history per ticker")
+        ctk.CTkComboBox(
+            param_row,
+            values=["Custom date range", "Full history per ticker"],
+            variable=self._matrix_mode_var,
+            width=210,
+            state="readonly",
+            command=self._on_matrix_mode_change,
+        ).pack(side="left", padx=(0, 8))
+
+        # ── Date row (toggled by mode selection) ─────────────────────
+        self._matrix_date_row = ctk.CTkFrame(tab, fg_color="transparent")
+
+        ctk.CTkLabel(self._matrix_date_row, text="From:").pack(side="left", padx=(0, 2))
+        self._matrix_from_entry = ctk.CTkEntry(
+            self._matrix_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        )
+        self._matrix_from_entry.pack(side="left", padx=(0, 14))
+
+        ctk.CTkLabel(self._matrix_date_row, text="To:").pack(side="left", padx=(0, 2))
+        self._matrix_to_entry = ctk.CTkEntry(
+            self._matrix_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        )
+        self._matrix_to_entry.pack(side="left")
+
+        # ── Run row ──────────────────────────────────────────────────
+        self._matrix_run_row = ctk.CTkFrame(tab, fg_color="transparent")
+        self._matrix_run_row.pack(fill="x", padx=12, pady=(4, 4))
+
+        self._matrix_run_btn = ctk.CTkButton(
+            self._matrix_run_row, text="Run Matrix Test", width=150,
+            fg_color="#9c27b0", hover_color="#7b1fa2",
+            command=self._run_matrix_test,
+        )
+        self._matrix_run_btn.pack(side="left", padx=(0, 14))
+
+        self._matrix_progress_label = ctk.CTkLabel(
+            self._matrix_run_row, text="", text_color="#888888", anchor="w",
+        )
+        self._matrix_progress_label.pack(side="left", padx=(4, 0))
+
+        # ── Progress bar ─────────────────────────────────────────────
+        self._matrix_progress_bar = ttk.Progressbar(
+            tab, orient="horizontal", mode="determinate",
+        )
+        self._matrix_progress_bar.pack(fill="x", padx=12, pady=(2, 4))
+
+        # ── Status ───────────────────────────────────────────────────
+        self._matrix_status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
+        self._matrix_status_label.pack(anchor="w", padx=12, pady=(0, 8))
+
+    def _on_matrix_mode_change(self, _=None):
+        if self._matrix_mode_var.get() == "Full history per ticker":
+            self._matrix_date_row.pack_forget()
+        else:
+            self._matrix_date_row.pack(
+                fill="x", padx=12, pady=(0, 4),
+                before=self._matrix_run_row,
+            )
+
+    def _run_matrix_test(self):
+        try:
+            assets_per_test = int(self._matrix_entries["Assets per Test"].get().strip())
+            sma_from = int(self._matrix_entries["SMA From"].get().strip())
+            sma_to = int(self._matrix_entries["SMA To"].get().strip())
+            max_combos = int(self._matrix_entries["Max Combinations"].get().strip())
+            capital = float(self._matrix_entries["Capital"].get().strip() or "10000")
+        except ValueError:
+            self._matrix_status_label.configure(
+                text="Invalid numeric input.", text_color="#ef5350",
+            )
+            return
+
+        if sma_from >= sma_to:
+            self._matrix_status_label.configure(
+                text="SMA From must be less than SMA To.", text_color="#ef5350",
+            )
+            return
+        if sma_from < 2:
+            self._matrix_status_label.configure(
+                text="SMA From must be at least 2.", text_color="#ef5350",
+            )
+            return
+        if assets_per_test < 1 or max_combos < 1:
+            self._matrix_status_label.configure(
+                text="Assets per Test and Max Combinations must be positive.",
+                text_color="#ef5350",
+            )
+            return
+
+        mode = self._matrix_mode_var.get()
+        start: str | None = None
+        end: str | None = None
+        if mode == "Custom date range":
+            start = self._matrix_from_entry.get().strip()
+            end = self._matrix_to_entry.get().strip()
+            if not start or not end:
+                self._matrix_status_label.configure(
+                    text="From and To dates are required for Custom date range.",
+                    text_color="#ef5350",
+                )
+                return
+
+        if not self._datasets:
+            self._matrix_status_label.configure(
+                text="No datasets loaded. Click Refresh first.", text_color="#ef5350",
+            )
+            return
+
+        from engine.matrix_runner import generate_sma_grid
+        sma_values, pairs = generate_sma_grid(sma_from, sma_to, max_combos)
+        sample_size = min(assets_per_test, len(self._datasets))
+        total_tasks = len(pairs) * sample_size
+
+        self._matrix_run_btn.configure(state="disabled")
+        self._matrix_progress_bar.configure(maximum=total_tasks, value=0)
+        self._matrix_progress_label.configure(text=f"0 / {total_tasks}")
+        self._matrix_status_label.configure(
+            text=f"Running matrix test: {len(pairs)} SMA combos × {sample_size} assets = {total_tasks} backtests...",
+            text_color="#888888",
+        )
+
+        datasets_snapshot = list(self._datasets)
+
+        def _progress_cb(done: int, tot: int, info: str):
+            self.after(0, lambda d=done, t=tot, i=info: self._on_matrix_progress(d, t, i))
+
+        def _execute():
+            try:
+                from engine.matrix_runner import run_matrix_test
+                result = run_matrix_test(
+                    all_datasets=datasets_snapshot,
+                    sma_from=sma_from,
+                    sma_to=sma_to,
+                    max_combinations=max_combos,
+                    assets_per_test=assets_per_test,
+                    capital=capital,
+                    timeframe_mode=mode,
+                    start=start,
+                    end=end,
+                    workers=8,
+                    progress_cb=_progress_cb,
+                )
+                self.after(0, lambda: self._on_matrix_done(result))
+            except Exception as exc:
+                self.after(0, lambda: self._on_matrix_error(str(exc)))
+
+        threading.Thread(target=_execute, daemon=True).start()
+
+    def _on_matrix_progress(self, done: int, total: int, info: str):
+        self._matrix_progress_bar.configure(value=done)
+        self._matrix_progress_label.configure(text=f"Running {info} \u2014 {done} / {total}")
+
+    def _on_matrix_done(self, result):
+        self._matrix_run_btn.configure(state="normal")
+        valid = sum(1 for c in result.cells if c.num_tickers_succeeded > 0)
+        self._matrix_progress_bar.configure(value=result.total_backtests_run)
+        self._matrix_progress_label.configure(
+            text=f"{result.total_backtests_run} / {result.total_backtests_run}",
+        )
+        self._matrix_status_label.configure(
+            text=f"Complete \u2014 {valid}/{len(result.cells)} combos with results. Building report...",
+            text_color="#26a69a",
+        )
+
+        def _build_and_open():
+            from display.ui import launch_matrix_ui
+            try:
+                launch_matrix_ui(result)
+                self.after(0, lambda: self._matrix_status_label.configure(
+                    text=f"Complete \u2014 {valid}/{len(result.cells)} combos. Report opened in browser.",
+                    text_color="#26a69a",
+                ))
+            except Exception as exc:
+                self.after(0, lambda msg=str(exc): self._matrix_status_label.configure(
+                    text=f"Report error: {msg}", text_color="#ef5350",
+                ))
+
+        threading.Thread(target=_build_and_open, daemon=True).start()
+
+    def _on_matrix_error(self, message: str):
+        self._matrix_run_btn.configure(state="normal")
+        self._matrix_status_label.configure(text=f"Error: {message}", text_color="#ef5350")
 
 
 def launch_desktop():

@@ -12,8 +12,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+import numpy as np
+
 from engine.backtester import BacktestResult
 from engine.bulk_runner import BulkBacktestResult
+from engine.matrix_runner import MatrixTestResult
 
 
 def _build_chart(
@@ -934,5 +937,281 @@ def launch_bulk_ui(result: BulkBacktestResult) -> None:
     """Build the bulk results interactive report and open it in the default browser."""
     page_html = _build_bulk_html(result)
     tmp = Path(tempfile.mktemp(suffix=".html", prefix="pq_bulk_"))
+    tmp.write_text(page_html, encoding="utf-8")
+    webbrowser.open(tmp.as_uri())
+
+
+# ── Matrix Test Report ─────────────────────────────────────────────────
+
+
+def _build_matrix_html(result: MatrixTestResult) -> str:
+    """Assemble the full matrix test HTML report with 3D surface and heatmap."""
+
+    valid_cells = [c for c in result.cells if c.num_tickers_succeeded > 0]
+
+    # ── Summary stats ────────────────────────────────────────────────
+    if valid_cells:
+        diffs = [c.avg_diff_vs_bh for c in valid_cells]
+        avg_diff = statistics.mean(diffs)
+        best = max(valid_cells, key=lambda c: c.avg_diff_vs_bh)
+        worst = min(valid_cells, key=lambda c: c.avg_diff_vs_bh)
+        positive = sum(1 for d in diffs if d > 0)
+    else:
+        avg_diff = 0.0
+        best = worst = None
+        positive = 0
+
+    best_str = (f"SMA {best.short_sma}/{best.long_sma} ({best.avg_diff_vs_bh:+.2f}%)"
+                if best else "&mdash;")
+    worst_str = (f"SMA {worst.short_sma}/{worst.long_sma} ({worst.avg_diff_vs_bh:+.2f}%)"
+                 if worst else "&mdash;")
+
+    summary_html = (
+        _stat_card("SMA Combinations", str(len(result.cells))) +
+        _stat_card("Total Backtests", f"{result.total_backtests_run:,}") +
+        _stat_card("Assets per Combo", str(result.assets_per_test)) +
+        _stat_card("SMA Values", f"{result.sma_from} \u2013 {result.sma_to} ({len(result.sma_values)} steps)") +
+        _stat_card("Avg Diff vs B&H", f"{avg_diff:+.2f}%", _pct_color(avg_diff)) +
+        _stat_card("Positive Combos", f"{positive} / {len(valid_cells)}",
+                   "#26a69a" if positive > len(valid_cells) / 2 else "#ef5350") +
+        _stat_card("Best Combo", best_str, "#26a69a") +
+        _stat_card("Worst Combo", worst_str, "#ef5350")
+    )
+
+    # ── Build Z-matrix for surface & heatmap ──────────────────────────
+    sma_vals = sorted(result.sma_values)
+    sma_idx = {v: i for i, v in enumerate(sma_vals)}
+    n = len(sma_vals)
+    z_matrix = np.full((n, n), float("nan"))
+
+    for c in valid_cells:
+        si = sma_idx.get(c.short_sma)
+        li = sma_idx.get(c.long_sma)
+        if si is not None and li is not None:
+            z_matrix[li, si] = c.avg_diff_vs_bh
+
+    # ── 3D Surface chart ──────────────────────────────────────────────
+    surface_fig = go.Figure(data=[go.Surface(
+        x=sma_vals,
+        y=sma_vals,
+        z=z_matrix.tolist(),
+        colorscale="RdYlGn",
+        colorbar=dict(title="Avg Diff vs B&H (%)"),
+        hovertemplate=(
+            "Short SMA: %{x}<br>"
+            "Long SMA: %{y}<br>"
+            "Avg Diff vs B&H: %{z:.2f}%<extra></extra>"
+        ),
+        connectgaps=False,
+    )])
+    surface_fig.update_layout(
+        **_dark_fig_layout("SMA Matrix — Avg Return Difference vs Buy & Hold", height=600),
+        scene=dict(
+            xaxis_title="Short SMA",
+            yaxis_title="Long SMA",
+            zaxis_title="Avg Diff vs B&H (%)",
+            bgcolor="#1e1e1e",
+            xaxis=dict(gridcolor="#333", color="#d4d4d4"),
+            yaxis=dict(gridcolor="#333", color="#d4d4d4"),
+            zaxis=dict(gridcolor="#333", color="#d4d4d4"),
+        ),
+    )
+    surface_div = surface_fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── 2D Heatmap ────────────────────────────────────────────────────
+    heatmap_fig = go.Figure(data=[go.Heatmap(
+        x=sma_vals,
+        y=sma_vals,
+        z=z_matrix.tolist(),
+        colorscale="RdYlGn",
+        zmid=0,
+        colorbar=dict(title="Avg Diff vs B&H (%)"),
+        hovertemplate=(
+            "Short SMA: %{x}<br>"
+            "Long SMA: %{y}<br>"
+            "Avg Diff vs B&H: %{z:.2f}%<extra></extra>"
+        ),
+    )])
+    heatmap_fig.update_layout(
+        **_dark_fig_layout("SMA Matrix Heatmap", height=550),
+        xaxis_title="Short SMA",
+        yaxis_title="Long SMA",
+    )
+    heatmap_fig.update_xaxes(gridcolor="#333")
+    heatmap_fig.update_yaxes(gridcolor="#333")
+    heatmap_div = heatmap_fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Top/Bottom table ──────────────────────────────────────────────
+    sorted_cells = sorted(valid_cells, key=lambda c: c.avg_diff_vs_bh, reverse=True)
+    top_n = min(10, len(sorted_cells))
+
+    combo_rows = ""
+    for rank, c in enumerate(sorted_cells[:top_n], 1):
+        color = _pct_color(c.avg_diff_vs_bh)
+        combo_rows += (
+            f'<tr>'
+            f'<td style="text-align:right">{rank}</td>'
+            f'<td>{c.short_sma}</td>'
+            f'<td>{c.long_sma}</td>'
+            f'<td style="text-align:right;color:{color};font-weight:600">{c.avg_diff_vs_bh:+.2f}%</td>'
+            f'<td style="text-align:right">{c.avg_strategy_return:+.2f}%</td>'
+            f'<td style="text-align:right">{c.avg_bh_return:+.2f}%</td>'
+            f'<td style="text-align:right">{c.beat_bh_count}/{c.num_tickers_succeeded}</td>'
+            f'</tr>\n'
+        )
+
+    if len(sorted_cells) > top_n:
+        combo_rows += (
+            '<tr><td colspan="7" style="text-align:center;color:#555;padding:12px">'
+            '&middot;&middot;&middot;</td></tr>\n'
+        )
+        for rank_offset, c in enumerate(sorted_cells[-top_n:], len(sorted_cells) - top_n + 1):
+            color = _pct_color(c.avg_diff_vs_bh)
+            combo_rows += (
+                f'<tr>'
+                f'<td style="text-align:right">{rank_offset}</td>'
+                f'<td>{c.short_sma}</td>'
+                f'<td>{c.long_sma}</td>'
+                f'<td style="text-align:right;color:{color};font-weight:600">{c.avg_diff_vs_bh:+.2f}%</td>'
+                f'<td style="text-align:right">{c.avg_strategy_return:+.2f}%</td>'
+                f'<td style="text-align:right">{c.avg_bh_return:+.2f}%</td>'
+                f'<td style="text-align:right">{c.beat_bh_count}/{c.num_tickers_succeeded}</td>'
+                f'</tr>\n'
+            )
+
+    # ── Timeframe description ─────────────────────────────────────────
+    if result.timeframe_mode == "Full history per ticker":
+        tf_desc = "Full history per ticker"
+    else:
+        tf_desc = (
+            f"{html.escape(result.custom_start)} &rarr; {html.escape(result.custom_end)}"
+        )
+
+    # ── Assemble page ─────────────────────────────────────────────────
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ProjectQuant &mdash; Matrix Test Results</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; padding: 24px;
+    background: #1e1e1e; color: #d4d4d4;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+  }}
+  h1 {{ margin: 0 0 4px; font-size: 24px; color: #fff; }}
+  .run-meta {{ color: #888; font-size: 12px; margin-bottom: 20px; }}
+  .summary {{
+    display: flex; flex-wrap: wrap; gap: 16px;
+    background: #252526; border: 1px solid #333;
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 16px;
+  }}
+  .stat {{ min-width: 160px; }}
+  .stat .label {{
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: #888; margin-bottom: 2px;
+  }}
+  .stat .value {{ font-size: 18px; font-weight: 600; color: #fff; }}
+  .table-wrap {{
+    background: #252526; border: 1px solid #333;
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+    overflow-x: auto;
+  }}
+  .table-wrap h3 {{ margin: 0 0 12px; font-size: 15px; color: #fff; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+  th {{
+    text-align: left; padding: 8px 12px;
+    border-bottom: 2px solid #444; color: #aaa;
+    font-weight: 600; text-transform: uppercase; font-size: 11px;
+    letter-spacing: 0.03em; white-space: nowrap;
+  }}
+  td {{ padding: 7px 12px; border-bottom: 1px solid #2e2e2e; white-space: nowrap; }}
+  tr:hover td {{ background: #2a2d2e; }}
+  .chart-section {{
+    background: #252526; border: 1px solid #333;
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+  }}
+  .chart-section h3 {{ margin: 0 0 12px; font-size: 15px; color: #fff; }}
+  .chart-tab-btns {{ display: flex; gap: 8px; margin-bottom: 12px; }}
+  .chart-tab-btn {{
+    background: #333; color: #aaa; border: 1px solid #444;
+    border-radius: 4px; padding: 6px 18px; cursor: pointer; font-size: 13px;
+    transition: background 0.15s;
+  }}
+  .chart-tab-btn:hover {{ background: #3a3a3a; color: #fff; }}
+  .chart-tab-btn.active {{ background: #9c27b0; color: #fff; border-color: #9c27b0; }}
+</style>
+</head>
+<body>
+
+<h1>Matrix Test Results</h1>
+<div class="run-meta">
+  Capital: ${result.initial_capital:,.2f} &nbsp;|&nbsp;
+  SMA range: {result.sma_from} &ndash; {result.sma_to} ({len(result.sma_values)} values) &nbsp;|&nbsp;
+  {len(result.cells)} combinations &times; {result.assets_per_test} assets &nbsp;|&nbsp;
+  Timeframe: {tf_desc} &nbsp;|&nbsp;
+  Run at: {html.escape(result.timestamp)}
+</div>
+
+<!-- Summary -->
+<div class="summary">
+  {summary_html}
+</div>
+
+<!-- Charts -->
+<div class="chart-section">
+  <h3>Analysis Charts</h3>
+  <div class="chart-tab-btns">
+    <button class="chart-tab-btn active" onclick="switchChart('surface', this)">3D Surface</button>
+    <button class="chart-tab-btn" onclick="switchChart('heatmap', this)">Heatmap</button>
+  </div>
+  <div id="chart-surface">{surface_div}</div>
+  <div id="chart-heatmap" style="display:none">{heatmap_div}</div>
+</div>
+
+<!-- Top/Bottom combos table -->
+<div class="table-wrap">
+  <h3>Top &amp; Bottom SMA Combinations</h3>
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:right">#</th>
+        <th>Short SMA</th>
+        <th>Long SMA</th>
+        <th style="text-align:right">Avg Diff vs B&amp;H</th>
+        <th style="text-align:right">Avg Strategy Return</th>
+        <th style="text-align:right">Avg B&amp;H Return</th>
+        <th style="text-align:right">Beat B&amp;H</th>
+      </tr>
+    </thead>
+    <tbody>
+{combo_rows}    </tbody>
+  </table>
+</div>
+
+<script>
+function switchChart(name, btn) {{
+  ['surface', 'heatmap'].forEach(function(n) {{
+    document.getElementById('chart-' + n).style.display = (n === name) ? 'block' : 'none';
+  }});
+  document.querySelectorAll('.chart-tab-btn').forEach(function(b) {{
+    b.classList.remove('active');
+  }});
+  btn.classList.add('active');
+}}
+</script>
+
+</body>
+</html>"""
+    return page
+
+
+def launch_matrix_ui(result: MatrixTestResult) -> None:
+    """Build the matrix test interactive report and open it in the default browser."""
+    page_html = _build_matrix_html(result)
+    tmp = Path(tempfile.mktemp(suffix=".html", prefix="pq_matrix_"))
     tmp.write_text(page_html, encoding="utf-8")
     webbrowser.open(tmp.as_uri())
