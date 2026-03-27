@@ -12,7 +12,6 @@ import pandas as pd
 from data.fetcher import load_local
 from data.scanner import DatasetInfo
 from engine.backtester import Backtester
-from strategies.sma_cross import SMACrossStrategy
 
 
 def _compute_yearly_returns(equity_curve: pd.Series, initial: float) -> dict[str, float]:
@@ -72,6 +71,7 @@ class BulkBacktestResult:
     custom_end: str = ""
     initial_capital: float = 10_000.0
     timestamp: str = ""
+    strategy_type: str = "sma"
 
 
 def _run_one(
@@ -82,6 +82,7 @@ def _run_one(
     short_sma: int,
     long_sma: int,
     timeframe_mode: str,
+    strategy_type: str = "sma",
 ) -> TickerResult:
     """Run a single backtest for *dataset*; captures any exception as an error field."""
     ticker = dataset.ticker
@@ -112,7 +113,12 @@ def _run_one(
                 error=f"Insufficient data ({len(df)} rows, need \u2265 {min_rows})",
             )
 
-        strategy = SMACrossStrategy(short_window=short_sma, long_window=long_sma)
+        if strategy_type == "ema":
+            from strategies.ema_cross import EMACrossStrategy
+            strategy = EMACrossStrategy(short_window=short_sma, long_window=long_sma)
+        else:
+            from strategies.sma_cross import SMACrossStrategy
+            strategy = SMACrossStrategy(short_window=short_sma, long_window=long_sma)
         signals = strategy.generate_signals(df)
         bt = Backtester(initial_capital=capital)
         result = bt.run(df, signals)
@@ -153,6 +159,7 @@ def run_bulk_backtest(
     short_sma: int,
     long_sma: int,
     timeframe_mode: str = "Custom date range",
+    strategy_type: str = "sma",
     workers: int = 8,
     progress_cb: Callable[[int, int, str], None] | None = None,
 ) -> BulkBacktestResult:
@@ -168,7 +175,7 @@ def run_bulk_backtest(
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
-                _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode
+                _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode, strategy_type
             ): i
             for i, ds in enumerate(datasets)
         }
@@ -190,4 +197,5 @@ def run_bulk_backtest(
         custom_end=end or "",
         initial_capital=capital,
         timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        strategy_type=strategy_type,
     )

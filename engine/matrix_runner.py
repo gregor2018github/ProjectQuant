@@ -42,6 +42,7 @@ class MatrixTestResult:
     custom_end: str = ""
     total_backtests_run: int = 0
     timestamp: str = ""
+    strategy_type: str = "sma"
 
 
 def generate_sma_grid(
@@ -77,6 +78,7 @@ def run_matrix_test(
     timeframe_mode: str,
     start: str | None,
     end: str | None,
+    strategy_type: str = "sma",
     workers: int = 8,
     progress_cb: Callable[[int, int, str], None] | None = None,
 ) -> MatrixTestResult:
@@ -101,18 +103,19 @@ def run_matrix_test(
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
-                _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode
+                _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode, strategy_type
             ): (short_sma, long_sma)
             for ds, short_sma, long_sma in tasks
         }
 
+        ind = strategy_type.upper()
         for future in as_completed(futures):
             key = futures[future]
             result = future.result()
             grouped[key].append(result)
             done_count += 1
             if progress_cb is not None:
-                progress_cb(done_count, total, f"{result.ticker} (SMA {key[0]}/{key[1]})")
+                progress_cb(done_count, total, f"{result.ticker} ({ind} {key[0]}/{key[1]})")
 
     # Aggregate per-cell
     cells: list[MatrixCellResult] = []
@@ -160,4 +163,5 @@ def run_matrix_test(
         custom_end=end or "",
         total_backtests_run=total,
         timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        strategy_type=strategy_type,
     )

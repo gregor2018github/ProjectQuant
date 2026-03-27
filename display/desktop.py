@@ -24,6 +24,9 @@ class ProjectQuantApp(ctk.CTk):
         self._sort_col: str = "Ticker"
         self._sort_reverse: bool = False
 
+        # Per-strategy UI state keyed by "sma" or "ema"
+        self._st: dict[str, dict] = {"sma": {}, "ema": {}}
+
         self._build_ui()
         self._style_treeview()
         self._load_data()
@@ -110,13 +113,17 @@ class ProjectQuantApp(ctk.CTk):
 
         self._tree.bind("<<TreeviewSelect>>", self._on_row_select)
 
-        # ── Tab view: Single Test / Bulk Test ──────────────────────
-        self._ctrl_tabs = ctk.CTkTabview(self)
-        self._ctrl_tabs.pack(fill="x", padx=20, pady=(0, 16))
+        # ── Outer strategy tabs: SMA Strategy / EMA Strategy ─────────
+        self._strategy_tabs = ctk.CTkTabview(self)
+        self._strategy_tabs.pack(fill="x", padx=20, pady=(0, 16))
 
-        self._build_single_test_tab(self._ctrl_tabs.add("Single Test"))
-        self._build_bulk_test_tab(self._ctrl_tabs.add("Bulk Test"))
-        self._build_matrix_test_tab(self._ctrl_tabs.add("Matrix Test"))
+        for strat, label in [("sma", "SMA Strategy"), ("ema", "EMA Strategy")]:
+            outer_tab = self._strategy_tabs.add(label)
+            inner_tabs = ctk.CTkTabview(outer_tab)
+            inner_tabs.pack(fill="both", expand=True, padx=0, pady=0)
+            self._build_single_test_tab(inner_tabs.add("Single Test"), strat)
+            self._build_bulk_test_tab(inner_tabs.add("Bulk Test"), strat)
+            self._build_matrix_test_tab(inner_tabs.add("Matrix Test"), strat)
 
     def _style_treeview(self):
         style = ttk.Style()
@@ -157,7 +164,7 @@ class ProjectQuantApp(ctk.CTk):
     # ── Data loading ─────────────────────────────────────────────────
 
     def _load_data(self):
-        self._status_label.configure(text="Scanning cache...")
+        self._count_label.configure(text="Scanning cache...")
         self._tree.delete(*self._tree.get_children())
 
         def _scan():
@@ -168,7 +175,6 @@ class ProjectQuantApp(ctk.CTk):
 
     def _on_scan_done(self, datasets: list[DatasetInfo]):
         self._datasets = datasets
-        self._status_label.configure(text="")
         self._populate_table()
 
     # ── Table population & filtering ─────────────────────────────────
@@ -232,42 +238,51 @@ class ProjectQuantApp(ctk.CTk):
 
         ticker, _, first_date, last_date = values[0], values[1], values[2], values[3]
 
-        self._bt_entries["Ticker"].delete(0, "end")
-        self._bt_entries["Ticker"].insert(0, ticker)
-        self._bt_entries["From"].delete(0, "end")
-        self._bt_entries["From"].insert(0, first_date)
-        self._bt_entries["To"].delete(0, "end")
-        self._bt_entries["To"].insert(0, last_date)
+        # Populate both strategies' Single Test entries
+        for strat in ("sma", "ema"):
+            entries = self._st[strat]["bt_entries"]
+            entries["Ticker"].delete(0, "end")
+            entries["Ticker"].insert(0, ticker)
+            entries["From"].delete(0, "end")
+            entries["From"].insert(0, first_date)
+            entries["To"].delete(0, "end")
+            entries["To"].insert(0, last_date)
 
-    # ── Backtest execution ───────────────────────────────────────────
+    # ── Full date range ──────────────────────────────────────────────
 
-    def _use_full_date_range(self):
-        ticker = self._bt_entries["Ticker"].get().strip().upper()
+    def _use_full_date_range(self, strat: str):
+        s = self._st[strat]
+        ticker = s["bt_entries"]["Ticker"].get().strip().upper()
         if not ticker:
-            self._status_label.configure(text="Enter a ticker first.", text_color="#ef5350")
+            s["status_label"].configure(text="Enter a ticker first.", text_color="#ef5350")
             return
         match = next((d for d in self._datasets if d.ticker.upper() == ticker), None)
         if match is None:
-            self._status_label.configure(
+            s["status_label"].configure(
                 text=f"Ticker '{ticker}' not found in loaded datasets.", text_color="#ef5350",
             )
             return
-        self._bt_entries["From"].delete(0, "end")
-        self._bt_entries["From"].insert(0, match.first_date)
-        self._bt_entries["To"].delete(0, "end")
-        self._bt_entries["To"].insert(0, match.last_date)
-        self._status_label.configure(text="", text_color="#888888")
+        s["bt_entries"]["From"].delete(0, "end")
+        s["bt_entries"]["From"].insert(0, match.first_date)
+        s["bt_entries"]["To"].delete(0, "end")
+        s["bt_entries"]["To"].insert(0, match.last_date)
+        s["status_label"].configure(text="", text_color="#888888")
 
-    def _run_backtest(self):
-        ticker = self._bt_entries["Ticker"].get().strip()
-        start = self._bt_entries["From"].get().strip()
-        end = self._bt_entries["To"].get().strip()
-        capital_str = self._bt_entries["Capital"].get().strip()
-        short_str = self._bt_entries["Short SMA"].get().strip()
-        long_str = self._bt_entries["Long SMA"].get().strip()
+    # ── Backtest execution ───────────────────────────────────────────
+
+    def _run_backtest(self, strat: str):
+        s = self._st[strat]
+        ticker = s["bt_entries"]["Ticker"].get().strip()
+        start = s["bt_entries"]["From"].get().strip()
+        end = s["bt_entries"]["To"].get().strip()
+        capital_str = s["bt_entries"]["Capital"].get().strip()
+        short_str = s["bt_entries"]["Short"].get().strip()
+        long_str = s["bt_entries"]["Long"].get().strip()
 
         if not ticker or not start or not end:
-            self._status_label.configure(text="Ticker, From, and To are required.", text_color="#ef5350")
+            s["status_label"].configure(
+                text="Ticker, From, and To are required.", text_color="#ef5350",
+            )
             return
 
         try:
@@ -275,38 +290,43 @@ class ProjectQuantApp(ctk.CTk):
             short_window = int(short_str) if short_str else 50
             long_window = int(long_str) if long_str else 200
         except ValueError:
-            self._status_label.configure(text="Invalid numeric input.", text_color="#ef5350")
+            s["status_label"].configure(text="Invalid numeric input.", text_color="#ef5350")
             return
 
-        self._run_btn.configure(state="disabled")
-        self._status_label.configure(
+        s["run_btn"].configure(state="disabled")
+        s["status_label"].configure(
             text=f"Running backtest for {ticker}...", text_color="#888888",
         )
 
         def _execute():
             try:
                 from data.fetcher import fetch_data
-                from strategies.sma_cross import SMACrossStrategy
                 from engine.backtester import Backtester
-                from display.ui import launch_ui
+
+                if strat == "ema":
+                    from strategies.ema_cross import EMACrossStrategy
+                    strategy = EMACrossStrategy(short_window=short_window, long_window=long_window)
+                else:
+                    from strategies.sma_cross import SMACrossStrategy
+                    strategy = SMACrossStrategy(short_window=short_window, long_window=long_window)
 
                 df = fetch_data(ticker, start, end)
-                strategy = SMACrossStrategy(short_window=short_window, long_window=long_window)
                 signals = strategy.generate_signals(df)
                 bt = Backtester(initial_capital=capital)
                 result = bt.run(df, signals)
 
                 self.after(0, lambda: self._on_backtest_done(
-                    ticker, start, end, capital, result, df, short_window, long_window,
+                    ticker, start, end, capital, result, df, short_window, long_window, strat,
                 ))
             except Exception as exc:
-                self.after(0, lambda: self._on_backtest_error(str(exc)))
+                self.after(0, lambda: self._on_backtest_error(str(exc), strat))
 
         threading.Thread(target=_execute, daemon=True).start()
 
-    def _on_backtest_done(self, ticker, start, end, capital, result, df, short_window, long_window):
-        self._run_btn.configure(state="normal")
-        self._status_label.configure(
+    def _on_backtest_done(self, ticker, start, end, capital, result, df, short_window, long_window, strat):
+        s = self._st[strat]
+        s["run_btn"].configure(state="normal")
+        s["status_label"].configure(
             text=f"Backtest complete \u2014 {len(result.trades)} trades. Opening results...",
             text_color="#26a69a",
         )
@@ -323,69 +343,80 @@ class ProjectQuantApp(ctk.CTk):
                     df=df,
                     short_window=short_window,
                     long_window=long_window,
+                    strategy_type=strat,
                 )
-                self.after(0, lambda: self._status_label.configure(
+                self.after(0, lambda: s["status_label"].configure(
                     text=f"Backtest complete \u2014 {len(result.trades)} trades. Report opened in browser.",
                     text_color="#26a69a",
                 ))
             except Exception as exc:
-                self.after(0, lambda msg=str(exc): self._status_label.configure(
+                self.after(0, lambda msg=str(exc): s["status_label"].configure(
                     text=f"Report error: {msg}", text_color="#ef5350",
                 ))
 
         threading.Thread(target=_build_and_open, daemon=True).start()
 
-    def _on_backtest_error(self, message: str):
-        self._run_btn.configure(state="normal")
-        self._status_label.configure(text=f"Error: {message}", text_color="#ef5350")
+    def _on_backtest_error(self, message: str, strat: str):
+        s = self._st[strat]
+        s["run_btn"].configure(state="normal")
+        s["status_label"].configure(text=f"Error: {message}", text_color="#ef5350")
 
     # ── Tab builders ─────────────────────────────────────────────────
 
-    def _build_single_test_tab(self, tab: ctk.CTkFrame):
-        """Recreate the single-ticker backtest controls inside *tab*."""
+    def _build_single_test_tab(self, tab: ctk.CTkFrame, strat: str):
+        s = self._st[strat]
+        ind = "EMA" if strat == "ema" else "SMA"
+
         ctk.CTkLabel(
             tab, text="Run Backtest",
             font=ctk.CTkFont(size=15, weight="bold"),
         ).grid(row=0, column=0, columnspan=14, padx=12, pady=(12, 8), sticky="w")
 
-        labels = ["Ticker", "From", "To", "Capital", "Short SMA", "Long SMA"]
-        defaults = ["", "", "", "10000", "50", "200"]
-        placeholders = ["AAPL", "YYYY-MM-DD", "YYYY-MM-DD", "10000", "50", "200"]
-        widths = [100, 130, 130, 100, 80, 80]
-        self._bt_entries: dict[str, ctk.CTkEntry] = {}
+        # (internal key, display label, default, placeholder, width)
+        fields = [
+            ("Ticker",  "Ticker",          "",      "AAPL",       100),
+            ("From",    "From",            "",      "YYYY-MM-DD", 130),
+            ("To",      "To",              "",      "YYYY-MM-DD", 130),
+            ("Capital", "Capital",         "10000", "10000",      100),
+            ("Short",   f"Short {ind}",    "50",    "50",          80),
+            ("Long",    f"Long {ind}",     "200",   "200",         80),
+        ]
+        s["bt_entries"] = {}
 
-        for i, (label, default, ph, w) in enumerate(zip(labels, defaults, placeholders, widths)):
-            ctk.CTkLabel(tab, text=label + ":").grid(
+        for i, (key, ui_label, default, ph, w) in enumerate(fields):
+            ctk.CTkLabel(tab, text=ui_label + ":").grid(
                 row=1, column=i * 2, padx=(12 if i == 0 else 4, 2), pady=(0, 12), sticky="e",
             )
             entry = ctk.CTkEntry(tab, width=w, placeholder_text=ph)
             if default:
                 entry.insert(0, default)
             entry.grid(row=1, column=i * 2 + 1, padx=(0, 8), pady=(0, 12))
-            self._bt_entries[label] = entry
+            s["bt_entries"][key] = entry
 
-        self._run_btn = ctk.CTkButton(
+        s["run_btn"] = ctk.CTkButton(
             tab, text="Run Backtest", width=130,
             fg_color="#26a69a", hover_color="#1e8c82",
-            command=self._run_backtest,
+            command=lambda: self._run_backtest(strat),
         )
-        self._run_btn.grid(row=1, column=len(labels) * 2, padx=(8, 4), pady=(0, 12))
+        s["run_btn"].grid(row=1, column=len(fields) * 2, padx=(8, 4), pady=(0, 12))
 
-        self._full_range_btn = ctk.CTkButton(
+        s["full_range_btn"] = ctk.CTkButton(
             tab, text="Full Range", width=100,
             fg_color="#555", hover_color="#444",
-            command=self._use_full_date_range,
+            command=lambda: self._use_full_date_range(strat),
         )
-        self._full_range_btn.grid(row=1, column=len(labels) * 2 + 1, padx=(0, 12), pady=(0, 12))
+        s["full_range_btn"].grid(row=1, column=len(fields) * 2 + 1, padx=(0, 12), pady=(0, 12))
 
-        self._status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
-        self._status_label.grid(
-            row=2, column=0, columnspan=len(labels) * 2 + 2,
+        s["status_label"] = ctk.CTkLabel(tab, text="", text_color="#888888")
+        s["status_label"].grid(
+            row=2, column=0, columnspan=len(fields) * 2 + 2,
             padx=12, pady=(0, 8), sticky="w",
         )
 
-    def _build_bulk_test_tab(self, tab: ctk.CTkFrame):
-        """Build bulk backtest controls inside *tab*."""
+    def _build_bulk_test_tab(self, tab: ctk.CTkFrame, strat: str):
+        s = self._st[strat]
+        ind = "EMA" if strat == "ema" else "SMA"
+
         ctk.CTkLabel(
             tab, text="Run Bulk Backtest",
             font=ctk.CTkFont(size=15, weight="bold"),
@@ -395,96 +426,98 @@ class ProjectQuantApp(ctk.CTk):
         param_row = ctk.CTkFrame(tab, fg_color="transparent")
         param_row.pack(fill="x", padx=12, pady=(0, 4))
 
-        self._bulk_entries: dict[str, ctk.CTkEntry] = {}
-        for label, default, width in [
-            ("Capital", "10000", 100),
-            ("Short SMA", "50", 80),
-            ("Long SMA", "200", 80),
+        s["bulk_entries"] = {}
+        for ui_label, key, default, width in [
+            ("Capital",       "Capital", "10000", 100),
+            (f"Short {ind}",  "Short",   "50",     80),
+            (f"Long {ind}",   "Long",    "200",    80),
         ]:
-            ctk.CTkLabel(param_row, text=label + ":").pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(param_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
             entry = ctk.CTkEntry(param_row, width=width)
             entry.insert(0, default)
             entry.pack(side="left", padx=(0, 14))
-            self._bulk_entries[label] = entry
+            s["bulk_entries"][key] = entry
 
         ctk.CTkLabel(param_row, text="Mode:").pack(side="left", padx=(0, 2))
-        self._bulk_mode_var = ctk.StringVar(value="Custom date range")
+        s["bulk_mode_var"] = ctk.StringVar(value="Custom date range")
         ctk.CTkComboBox(
             param_row,
             values=["Custom date range", "Full history per ticker"],
-            variable=self._bulk_mode_var,
+            variable=s["bulk_mode_var"],
             width=210,
             state="readonly",
-            command=self._on_bulk_mode_change,
+            command=lambda _: self._on_bulk_mode_change(strat),
         ).pack(side="left", padx=(0, 8))
 
         # ── Date row (toggled by mode selection) ─────────────────────
-        self._bulk_date_row = ctk.CTkFrame(tab, fg_color="transparent")
-        self._bulk_date_row.pack(fill="x", padx=12, pady=(0, 4))
+        s["bulk_date_row"] = ctk.CTkFrame(tab, fg_color="transparent")
+        s["bulk_date_row"].pack(fill="x", padx=12, pady=(0, 4))
 
-        ctk.CTkLabel(self._bulk_date_row, text="From:").pack(side="left", padx=(0, 2))
-        self._bulk_from_entry = ctk.CTkEntry(
-            self._bulk_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        ctk.CTkLabel(s["bulk_date_row"], text="From:").pack(side="left", padx=(0, 2))
+        s["bulk_from_entry"] = ctk.CTkEntry(
+            s["bulk_date_row"], width=130, placeholder_text="YYYY-MM-DD",
         )
-        self._bulk_from_entry.pack(side="left", padx=(0, 14))
+        s["bulk_from_entry"].pack(side="left", padx=(0, 14))
 
-        ctk.CTkLabel(self._bulk_date_row, text="To:").pack(side="left", padx=(0, 2))
-        self._bulk_to_entry = ctk.CTkEntry(
-            self._bulk_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        ctk.CTkLabel(s["bulk_date_row"], text="To:").pack(side="left", padx=(0, 2))
+        s["bulk_to_entry"] = ctk.CTkEntry(
+            s["bulk_date_row"], width=130, placeholder_text="YYYY-MM-DD",
         )
-        self._bulk_to_entry.pack(side="left")
+        s["bulk_to_entry"].pack(side="left")
 
         # ── Run row ──────────────────────────────────────────────────
-        self._bulk_run_row = ctk.CTkFrame(tab, fg_color="transparent")
-        self._bulk_run_row.pack(fill="x", padx=12, pady=(4, 4))
+        s["bulk_run_row"] = ctk.CTkFrame(tab, fg_color="transparent")
+        s["bulk_run_row"].pack(fill="x", padx=12, pady=(4, 4))
 
-        self._bulk_run_btn = ctk.CTkButton(
-            self._bulk_run_row, text="Run All Tickers", width=150,
+        s["bulk_run_btn"] = ctk.CTkButton(
+            s["bulk_run_row"], text="Run All Tickers", width=150,
             fg_color="#ff9800", hover_color="#c77800",
-            command=self._run_bulk_backtest,
+            command=lambda: self._run_bulk_backtest(strat),
         )
-        self._bulk_run_btn.pack(side="left", padx=(0, 14))
+        s["bulk_run_btn"].pack(side="left", padx=(0, 14))
 
-        self._bulk_progress_label = ctk.CTkLabel(
-            self._bulk_run_row, text="", text_color="#888888", anchor="w",
+        s["bulk_progress_label"] = ctk.CTkLabel(
+            s["bulk_run_row"], text="", text_color="#888888", anchor="w",
         )
-        self._bulk_progress_label.pack(side="left", padx=(4, 0))
+        s["bulk_progress_label"].pack(side="left", padx=(4, 0))
 
         # ── Progress bar ─────────────────────────────────────────────
-        self._bulk_progress_bar = ttk.Progressbar(
+        s["bulk_progress_bar"] = ttk.Progressbar(
             tab, orient="horizontal", mode="determinate",
         )
-        self._bulk_progress_bar.pack(fill="x", padx=12, pady=(2, 4))
+        s["bulk_progress_bar"].pack(fill="x", padx=12, pady=(2, 4))
 
         # ── Status ───────────────────────────────────────────────────
-        self._bulk_status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
-        self._bulk_status_label.pack(anchor="w", padx=12, pady=(0, 8))
+        s["bulk_status_label"] = ctk.CTkLabel(tab, text="", text_color="#888888")
+        s["bulk_status_label"].pack(anchor="w", padx=12, pady=(0, 8))
 
     # ── Bulk mode toggle ──────────────────────────────────────────────
 
-    def _on_bulk_mode_change(self, _=None):
-        if self._bulk_mode_var.get() == "Full history per ticker":
-            self._bulk_date_row.pack_forget()
+    def _on_bulk_mode_change(self, strat: str):
+        s = self._st[strat]
+        if s["bulk_mode_var"].get() == "Full history per ticker":
+            s["bulk_date_row"].pack_forget()
         else:
-            self._bulk_date_row.pack(
+            s["bulk_date_row"].pack(
                 fill="x", padx=12, pady=(0, 4),
-                before=self._bulk_run_row,
+                before=s["bulk_run_row"],
             )
 
     # ── Bulk backtest execution ───────────────────────────────────────
 
-    def _run_bulk_backtest(self):
-        capital_str = self._bulk_entries["Capital"].get().strip()
-        short_str = self._bulk_entries["Short SMA"].get().strip()
-        long_str = self._bulk_entries["Long SMA"].get().strip()
-        mode = self._bulk_mode_var.get()
+    def _run_bulk_backtest(self, strat: str):
+        s = self._st[strat]
+        capital_str = s["bulk_entries"]["Capital"].get().strip()
+        short_str = s["bulk_entries"]["Short"].get().strip()
+        long_str = s["bulk_entries"]["Long"].get().strip()
+        mode = s["bulk_mode_var"].get()
 
         try:
             capital = float(capital_str) if capital_str else 10_000.0
             short_window = int(short_str) if short_str else 50
             long_window = int(long_str) if long_str else 200
         except ValueError:
-            self._bulk_status_label.configure(
+            s["bulk_status_label"].configure(
                 text="Invalid numeric input.", text_color="#ef5350",
             )
             return
@@ -492,33 +525,33 @@ class ProjectQuantApp(ctk.CTk):
         start: str | None = None
         end: str | None = None
         if mode == "Custom date range":
-            start = self._bulk_from_entry.get().strip()
-            end = self._bulk_to_entry.get().strip()
+            start = s["bulk_from_entry"].get().strip()
+            end = s["bulk_to_entry"].get().strip()
             if not start or not end:
-                self._bulk_status_label.configure(
+                s["bulk_status_label"].configure(
                     text="From and To dates are required for Custom date range.",
                     text_color="#ef5350",
                 )
                 return
 
         if not self._datasets:
-            self._bulk_status_label.configure(
+            s["bulk_status_label"].configure(
                 text="No datasets loaded. Click Refresh first.", text_color="#ef5350",
             )
             return
 
         total = len(self._datasets)
-        self._bulk_run_btn.configure(state="disabled")
-        self._bulk_progress_bar.configure(maximum=total, value=0)
-        self._bulk_progress_label.configure(text=f"0 / {total}")
-        self._bulk_status_label.configure(
+        s["bulk_run_btn"].configure(state="disabled")
+        s["bulk_progress_bar"].configure(maximum=total, value=0)
+        s["bulk_progress_label"].configure(text=f"0 / {total}")
+        s["bulk_status_label"].configure(
             text=f"Running bulk backtest on {total} tickers...", text_color="#888888",
         )
 
         datasets_snapshot = list(self._datasets)
 
         def _progress_cb(done: int, tot: int, ticker: str):
-            self.after(0, lambda d=done, t=tot, tk=ticker: self._on_bulk_progress(d, t, tk))
+            self.after(0, lambda d=done, t=tot, tk=ticker: self._on_bulk_progress(d, t, tk, strat))
 
         def _execute():
             try:
@@ -531,26 +564,29 @@ class ProjectQuantApp(ctk.CTk):
                     short_sma=short_window,
                     long_sma=long_window,
                     timeframe_mode=mode,
+                    strategy_type=strat,
                     workers=8,
                     progress_cb=_progress_cb,
                 )
-                self.after(0, lambda: self._on_bulk_done(result))
+                self.after(0, lambda: self._on_bulk_done(result, strat))
             except Exception as exc:
-                self.after(0, lambda: self._on_bulk_error(str(exc)))
+                self.after(0, lambda: self._on_bulk_error(str(exc), strat))
 
         threading.Thread(target=_execute, daemon=True).start()
 
-    def _on_bulk_progress(self, done: int, total: int, ticker: str):
-        self._bulk_progress_bar.configure(value=done)
-        self._bulk_progress_label.configure(text=f"Running {ticker} \u2014 {done} / {total}")
+    def _on_bulk_progress(self, done: int, total: int, ticker: str, strat: str):
+        s = self._st[strat]
+        s["bulk_progress_bar"].configure(value=done)
+        s["bulk_progress_label"].configure(text=f"Running {ticker} \u2014 {done} / {total}")
 
-    def _on_bulk_done(self, result):
-        self._bulk_run_btn.configure(state="normal")
+    def _on_bulk_done(self, result, strat: str):
+        s = self._st[strat]
+        s["bulk_run_btn"].configure(state="normal")
         successful = sum(1 for r in result.ticker_results if r.error is None)
         n = len(result.ticker_results)
-        self._bulk_progress_bar.configure(value=n)
-        self._bulk_progress_label.configure(text=f"{n} / {n}")
-        self._bulk_status_label.configure(
+        s["bulk_progress_bar"].configure(value=n)
+        s["bulk_progress_label"].configure(text=f"{n} / {n}")
+        s["bulk_status_label"].configure(
             text=f"Complete \u2014 {successful}/{n} succeeded. Building report...",
             text_color="#26a69a",
         )
@@ -559,25 +595,28 @@ class ProjectQuantApp(ctk.CTk):
             from display.ui import launch_bulk_ui
             try:
                 launch_bulk_ui(result)
-                self.after(0, lambda: self._bulk_status_label.configure(
+                self.after(0, lambda: s["bulk_status_label"].configure(
                     text=f"Complete \u2014 {successful}/{n} succeeded. Report opened in browser.",
                     text_color="#26a69a",
                 ))
             except Exception as exc:
-                self.after(0, lambda msg=str(exc): self._bulk_status_label.configure(
+                self.after(0, lambda msg=str(exc): s["bulk_status_label"].configure(
                     text=f"Report error: {msg}", text_color="#ef5350",
                 ))
 
         threading.Thread(target=_build_and_open, daemon=True).start()
 
-    def _on_bulk_error(self, message: str):
-        self._bulk_run_btn.configure(state="normal")
-        self._bulk_status_label.configure(text=f"Error: {message}", text_color="#ef5350")
+    def _on_bulk_error(self, message: str, strat: str):
+        s = self._st[strat]
+        s["bulk_run_btn"].configure(state="normal")
+        s["bulk_status_label"].configure(text=f"Error: {message}", text_color="#ef5350")
 
     # ── Matrix Test tab ───────────────────────────────────────────────
 
-    def _build_matrix_test_tab(self, tab: ctk.CTkFrame):
-        """Build matrix test controls inside *tab*."""
+    def _build_matrix_test_tab(self, tab: ctk.CTkFrame, strat: str):
+        s = self._st[strat]
+        ind = "EMA" if strat == "ema" else "SMA"
+
         ctk.CTkLabel(
             tab, text="Run Matrix Test",
             font=ctk.CTkFont(size=15, weight="bold"),
@@ -587,126 +626,129 @@ class ProjectQuantApp(ctk.CTk):
         param_row = ctk.CTkFrame(tab, fg_color="transparent")
         param_row.pack(fill="x", padx=12, pady=(0, 4))
 
-        self._matrix_entries: dict[str, ctk.CTkEntry] = {}
-        for label, default, width in [
-            ("Assets per Test", "30", 70),
-            ("SMA From", "3", 60),
-            ("SMA To", "200", 60),
-            ("Max Combinations", "150", 70),
-            ("Capital", "10000", 100),
+        s["matrix_entries"] = {}
+        for ui_label, key, default, width in [
+            ("Assets per Test",  "Assets per Test",  "30",  70),
+            (f"{ind} From",      "From",             "3",   60),
+            (f"{ind} To",        "To",               "200", 60),
+            ("Max Combinations", "Max Combinations", "150", 70),
+            ("Capital",          "Capital",          "10000", 100),
         ]:
-            ctk.CTkLabel(param_row, text=label + ":").pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(param_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
             entry = ctk.CTkEntry(param_row, width=width)
             entry.insert(0, default)
             entry.pack(side="left", padx=(0, 14))
-            self._matrix_entries[label] = entry
+            s["matrix_entries"][key] = entry
 
         ctk.CTkLabel(param_row, text="Mode:").pack(side="left", padx=(0, 2))
-        self._matrix_mode_var = ctk.StringVar(value="Full history per ticker")
+        s["matrix_mode_var"] = ctk.StringVar(value="Full history per ticker")
         ctk.CTkComboBox(
             param_row,
             values=["Custom date range", "Full history per ticker"],
-            variable=self._matrix_mode_var,
+            variable=s["matrix_mode_var"],
             width=210,
             state="readonly",
-            command=self._on_matrix_mode_change,
+            command=lambda _: self._on_matrix_mode_change(strat),
         ).pack(side="left", padx=(0, 8))
 
         # ── Date row (toggled by mode selection) ─────────────────────
-        self._matrix_date_row = ctk.CTkFrame(tab, fg_color="transparent")
+        s["matrix_date_row"] = ctk.CTkFrame(tab, fg_color="transparent")
 
-        ctk.CTkLabel(self._matrix_date_row, text="From:").pack(side="left", padx=(0, 2))
-        self._matrix_from_entry = ctk.CTkEntry(
-            self._matrix_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        ctk.CTkLabel(s["matrix_date_row"], text="From:").pack(side="left", padx=(0, 2))
+        s["matrix_from_entry"] = ctk.CTkEntry(
+            s["matrix_date_row"], width=130, placeholder_text="YYYY-MM-DD",
         )
-        self._matrix_from_entry.pack(side="left", padx=(0, 14))
+        s["matrix_from_entry"].pack(side="left", padx=(0, 14))
 
-        ctk.CTkLabel(self._matrix_date_row, text="To:").pack(side="left", padx=(0, 2))
-        self._matrix_to_entry = ctk.CTkEntry(
-            self._matrix_date_row, width=130, placeholder_text="YYYY-MM-DD",
+        ctk.CTkLabel(s["matrix_date_row"], text="To:").pack(side="left", padx=(0, 2))
+        s["matrix_to_entry"] = ctk.CTkEntry(
+            s["matrix_date_row"], width=130, placeholder_text="YYYY-MM-DD",
         )
-        self._matrix_to_entry.pack(side="left")
+        s["matrix_to_entry"].pack(side="left")
 
         # ── Run row ──────────────────────────────────────────────────
-        self._matrix_run_row = ctk.CTkFrame(tab, fg_color="transparent")
-        self._matrix_run_row.pack(fill="x", padx=12, pady=(4, 4))
+        s["matrix_run_row"] = ctk.CTkFrame(tab, fg_color="transparent")
+        s["matrix_run_row"].pack(fill="x", padx=12, pady=(4, 4))
 
-        self._matrix_run_btn = ctk.CTkButton(
-            self._matrix_run_row, text="Run Matrix Test", width=150,
+        s["matrix_run_btn"] = ctk.CTkButton(
+            s["matrix_run_row"], text="Run Matrix Test", width=150,
             fg_color="#9c27b0", hover_color="#7b1fa2",
-            command=self._run_matrix_test,
+            command=lambda: self._run_matrix_test(strat),
         )
-        self._matrix_run_btn.pack(side="left", padx=(0, 14))
+        s["matrix_run_btn"].pack(side="left", padx=(0, 14))
 
-        self._matrix_progress_label = ctk.CTkLabel(
-            self._matrix_run_row, text="", text_color="#888888", anchor="w",
+        s["matrix_progress_label"] = ctk.CTkLabel(
+            s["matrix_run_row"], text="", text_color="#888888", anchor="w",
         )
-        self._matrix_progress_label.pack(side="left", padx=(4, 0))
+        s["matrix_progress_label"].pack(side="left", padx=(4, 0))
 
         # ── Progress bar ─────────────────────────────────────────────
-        self._matrix_progress_bar = ttk.Progressbar(
+        s["matrix_progress_bar"] = ttk.Progressbar(
             tab, orient="horizontal", mode="determinate",
         )
-        self._matrix_progress_bar.pack(fill="x", padx=12, pady=(2, 4))
+        s["matrix_progress_bar"].pack(fill="x", padx=12, pady=(2, 4))
 
         # ── Status ───────────────────────────────────────────────────
-        self._matrix_status_label = ctk.CTkLabel(tab, text="", text_color="#888888")
-        self._matrix_status_label.pack(anchor="w", padx=12, pady=(0, 8))
+        s["matrix_status_label"] = ctk.CTkLabel(tab, text="", text_color="#888888")
+        s["matrix_status_label"].pack(anchor="w", padx=12, pady=(0, 8))
 
-    def _on_matrix_mode_change(self, _=None):
-        if self._matrix_mode_var.get() == "Full history per ticker":
-            self._matrix_date_row.pack_forget()
+    def _on_matrix_mode_change(self, strat: str):
+        s = self._st[strat]
+        if s["matrix_mode_var"].get() == "Full history per ticker":
+            s["matrix_date_row"].pack_forget()
         else:
-            self._matrix_date_row.pack(
+            s["matrix_date_row"].pack(
                 fill="x", padx=12, pady=(0, 4),
-                before=self._matrix_run_row,
+                before=s["matrix_run_row"],
             )
 
-    def _run_matrix_test(self):
+    def _run_matrix_test(self, strat: str):
+        s = self._st[strat]
+        ind = "EMA" if strat == "ema" else "SMA"
         try:
-            assets_per_test = int(self._matrix_entries["Assets per Test"].get().strip())
-            sma_from = int(self._matrix_entries["SMA From"].get().strip())
-            sma_to = int(self._matrix_entries["SMA To"].get().strip())
-            max_combos = int(self._matrix_entries["Max Combinations"].get().strip())
-            capital = float(self._matrix_entries["Capital"].get().strip() or "10000")
+            assets_per_test = int(s["matrix_entries"]["Assets per Test"].get().strip())
+            sma_from = int(s["matrix_entries"]["From"].get().strip())
+            sma_to = int(s["matrix_entries"]["To"].get().strip())
+            max_combos = int(s["matrix_entries"]["Max Combinations"].get().strip())
+            capital = float(s["matrix_entries"]["Capital"].get().strip() or "10000")
         except ValueError:
-            self._matrix_status_label.configure(
+            s["matrix_status_label"].configure(
                 text="Invalid numeric input.", text_color="#ef5350",
             )
             return
 
         if sma_from >= sma_to:
-            self._matrix_status_label.configure(
-                text="SMA From must be less than SMA To.", text_color="#ef5350",
+            s["matrix_status_label"].configure(
+                text=f"{ind} From must be less than {ind} To.", text_color="#ef5350",
             )
             return
         if sma_from < 2:
-            self._matrix_status_label.configure(
-                text="SMA From must be at least 2.", text_color="#ef5350",
+            s["matrix_status_label"].configure(
+                text=f"{ind} From must be at least 2.", text_color="#ef5350",
             )
             return
         if assets_per_test < 1 or max_combos < 1:
-            self._matrix_status_label.configure(
+            s["matrix_status_label"].configure(
                 text="Assets per Test and Max Combinations must be positive.",
                 text_color="#ef5350",
             )
             return
 
-        mode = self._matrix_mode_var.get()
+        mode = s["matrix_mode_var"].get()
         start: str | None = None
         end: str | None = None
         if mode == "Custom date range":
-            start = self._matrix_from_entry.get().strip()
-            end = self._matrix_to_entry.get().strip()
+            start = s["matrix_from_entry"].get().strip()
+            end = s["matrix_to_entry"].get().strip()
             if not start or not end:
-                self._matrix_status_label.configure(
+                s["matrix_status_label"].configure(
                     text="From and To dates are required for Custom date range.",
                     text_color="#ef5350",
                 )
                 return
 
         if not self._datasets:
-            self._matrix_status_label.configure(
+            s["matrix_status_label"].configure(
                 text="No datasets loaded. Click Refresh first.", text_color="#ef5350",
             )
             return
@@ -716,18 +758,18 @@ class ProjectQuantApp(ctk.CTk):
         sample_size = min(assets_per_test, len(self._datasets))
         total_tasks = len(pairs) * sample_size
 
-        self._matrix_run_btn.configure(state="disabled")
-        self._matrix_progress_bar.configure(maximum=total_tasks, value=0)
-        self._matrix_progress_label.configure(text=f"0 / {total_tasks}")
-        self._matrix_status_label.configure(
-            text=f"Running matrix test: {len(pairs)} SMA combos × {sample_size} assets = {total_tasks} backtests...",
+        s["matrix_run_btn"].configure(state="disabled")
+        s["matrix_progress_bar"].configure(maximum=total_tasks, value=0)
+        s["matrix_progress_label"].configure(text=f"0 / {total_tasks}")
+        s["matrix_status_label"].configure(
+            text=f"Running matrix test: {len(pairs)} {ind} combos × {sample_size} assets = {total_tasks} backtests...",
             text_color="#888888",
         )
 
         datasets_snapshot = list(self._datasets)
 
         def _progress_cb(done: int, tot: int, info: str):
-            self.after(0, lambda d=done, t=tot, i=info: self._on_matrix_progress(d, t, i))
+            self.after(0, lambda d=done, t=tot, i=info: self._on_matrix_progress(d, t, i, strat))
 
         def _execute():
             try:
@@ -742,27 +784,30 @@ class ProjectQuantApp(ctk.CTk):
                     timeframe_mode=mode,
                     start=start,
                     end=end,
+                    strategy_type=strat,
                     workers=8,
                     progress_cb=_progress_cb,
                 )
-                self.after(0, lambda: self._on_matrix_done(result))
+                self.after(0, lambda: self._on_matrix_done(result, strat))
             except Exception as exc:
-                self.after(0, lambda: self._on_matrix_error(str(exc)))
+                self.after(0, lambda: self._on_matrix_error(str(exc), strat))
 
         threading.Thread(target=_execute, daemon=True).start()
 
-    def _on_matrix_progress(self, done: int, total: int, info: str):
-        self._matrix_progress_bar.configure(value=done)
-        self._matrix_progress_label.configure(text=f"Running {info} \u2014 {done} / {total}")
+    def _on_matrix_progress(self, done: int, total: int, info: str, strat: str):
+        s = self._st[strat]
+        s["matrix_progress_bar"].configure(value=done)
+        s["matrix_progress_label"].configure(text=f"Running {info} \u2014 {done} / {total}")
 
-    def _on_matrix_done(self, result):
-        self._matrix_run_btn.configure(state="normal")
+    def _on_matrix_done(self, result, strat: str):
+        s = self._st[strat]
+        s["matrix_run_btn"].configure(state="normal")
         valid = sum(1 for c in result.cells if c.num_tickers_succeeded > 0)
-        self._matrix_progress_bar.configure(value=result.total_backtests_run)
-        self._matrix_progress_label.configure(
+        s["matrix_progress_bar"].configure(value=result.total_backtests_run)
+        s["matrix_progress_label"].configure(
             text=f"{result.total_backtests_run} / {result.total_backtests_run}",
         )
-        self._matrix_status_label.configure(
+        s["matrix_status_label"].configure(
             text=f"Complete \u2014 {valid}/{len(result.cells)} combos with results. Building report...",
             text_color="#26a69a",
         )
@@ -771,20 +816,21 @@ class ProjectQuantApp(ctk.CTk):
             from display.ui import launch_matrix_ui
             try:
                 launch_matrix_ui(result)
-                self.after(0, lambda: self._matrix_status_label.configure(
+                self.after(0, lambda: s["matrix_status_label"].configure(
                     text=f"Complete \u2014 {valid}/{len(result.cells)} combos. Report opened in browser.",
                     text_color="#26a69a",
                 ))
             except Exception as exc:
-                self.after(0, lambda msg=str(exc): self._matrix_status_label.configure(
+                self.after(0, lambda msg=str(exc): s["matrix_status_label"].configure(
                     text=f"Report error: {msg}", text_color="#ef5350",
                 ))
 
         threading.Thread(target=_build_and_open, daemon=True).start()
 
-    def _on_matrix_error(self, message: str):
-        self._matrix_run_btn.configure(state="normal")
-        self._matrix_status_label.configure(text=f"Error: {message}", text_color="#ef5350")
+    def _on_matrix_error(self, message: str, strat: str):
+        s = self._st[strat]
+        s["matrix_run_btn"].configure(state="normal")
+        s["matrix_status_label"].configure(text=f"Error: {message}", text_color="#ef5350")
 
 
 def launch_desktop():

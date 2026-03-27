@@ -25,12 +25,18 @@ def _build_chart(
     equity_curve: pd.Series,
     short_window: int,
     long_window: int,
+    strategy_type: str = "sma",
 ) -> str:
     """Build an interactive Plotly candlestick chart and return its HTML div."""
 
     close = df["Close"]
-    sma_short = close.rolling(window=short_window).mean()
-    sma_long = close.rolling(window=long_window).mean()
+    ind = strategy_type.upper()
+    if strategy_type == "ema":
+        sma_short = close.ewm(span=short_window, adjust=False).mean()
+        sma_long = close.ewm(span=long_window, adjust=False).mean()
+    else:
+        sma_short = close.rolling(window=short_window).mean()
+        sma_long = close.rolling(window=long_window).mean()
 
     # Build equity series aligned to all dates (forward-fill for days without trades)
     equity_by_date = equity_curve.reindex(df.index).ffill()
@@ -62,22 +68,22 @@ def _build_chart(
         row=1, col=1,
     )
 
-    # --- SMA lines ---
+    # --- MA lines ---
     fig.add_trace(
         go.Scatter(
             x=df.index, y=sma_short,
-            name=f"SMA {short_window}",
+            name=f"{ind} {short_window}",
             line=dict(color="#ff9800", width=1.5),
-            hovertemplate=f"SMA {short_window}: " + "%{y:$.2f}<extra></extra>",
+            hovertemplate=f"{ind} {short_window}: " + "%{y:$.2f}<extra></extra>",
         ),
         row=1, col=1,
     )
     fig.add_trace(
         go.Scatter(
             x=df.index, y=sma_long,
-            name=f"SMA {long_window}",
+            name=f"{ind} {long_window}",
             line=dict(color="#2196f3", width=1.5),
-            hovertemplate=f"SMA {long_window}: " + "%{y:$.2f}<extra></extra>",
+            hovertemplate=f"{ind} {long_window}: " + "%{y:$.2f}<extra></extra>",
         ),
         row=1, col=1,
     )
@@ -359,6 +365,7 @@ def launch_ui(
     df: pd.DataFrame,
     short_window: int,
     long_window: int,
+    strategy_type: str = "sma",
 ) -> None:
     """Build the interactive report and open it in the default browser."""
 
@@ -368,6 +375,7 @@ def launch_ui(
         equity_curve=result.equity_curve,
         short_window=short_window,
         long_window=long_window,
+        strategy_type=strategy_type,
     )
 
     page_html = _build_html(
@@ -538,7 +546,7 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
     year_fig = go.Figure()
     year_fig.add_trace(go.Bar(
         x=years, y=avg_strat_yr,
-        name=f"Strategy (SMA {result.short_sma}/{result.long_sma})",
+        name=f"Strategy ({result.strategy_type.upper()} {result.short_sma}/{result.long_sma})",
         marker_color="#26a69a",
         hovertemplate="<b>%{x}</b><br>Avg Strategy: %{y:+.2f}%<extra></extra>",
     ))
@@ -846,7 +854,7 @@ def _build_bulk_html(result: BulkBacktestResult) -> str:
 <h1>Bulk Backtest Results</h1>
 <div class="run-meta">
   Capital: ${result.initial_capital:,.2f} &nbsp;|&nbsp;
-  SMA {result.short_sma}/{result.long_sma} &nbsp;|&nbsp;
+  {result.strategy_type.upper()} {result.short_sma}/{result.long_sma} &nbsp;|&nbsp;
   Timeframe: {tf_desc} &nbsp;|&nbsp;
   Run at: {html.escape(result.timestamp)}
 </div>
@@ -948,6 +956,7 @@ def _build_matrix_html(result: MatrixTestResult) -> str:
     """Assemble the full matrix test HTML report with 3D surface and heatmap."""
 
     valid_cells = [c for c in result.cells if c.num_tickers_succeeded > 0]
+    ind = result.strategy_type.upper()
 
     # ── Summary stats ────────────────────────────────────────────────
     if valid_cells:
@@ -961,16 +970,16 @@ def _build_matrix_html(result: MatrixTestResult) -> str:
         best = worst = None
         positive = 0
 
-    best_str = (f"SMA {best.short_sma}/{best.long_sma} ({best.avg_diff_vs_bh:+.2f}%)"
+    best_str = (f"{ind} {best.short_sma}/{best.long_sma} ({best.avg_diff_vs_bh:+.2f}%)"
                 if best else "&mdash;")
-    worst_str = (f"SMA {worst.short_sma}/{worst.long_sma} ({worst.avg_diff_vs_bh:+.2f}%)"
+    worst_str = (f"{ind} {worst.short_sma}/{worst.long_sma} ({worst.avg_diff_vs_bh:+.2f}%)"
                  if worst else "&mdash;")
 
     summary_html = (
-        _stat_card("SMA Combinations", str(len(result.cells))) +
+        _stat_card(f"{ind} Combinations", str(len(result.cells))) +
         _stat_card("Total Backtests", f"{result.total_backtests_run:,}") +
         _stat_card("Assets per Combo", str(result.assets_per_test)) +
-        _stat_card("SMA Values", f"{result.sma_from} \u2013 {result.sma_to} ({len(result.sma_values)} steps)") +
+        _stat_card(f"{ind} Values", f"{result.sma_from} \u2013 {result.sma_to} ({len(result.sma_values)} steps)") +
         _stat_card("Avg Diff vs B&H", f"{avg_diff:+.2f}%", _pct_color(avg_diff)) +
         _stat_card("Positive Combos", f"{positive} / {len(valid_cells)}",
                    "#26a69a" if positive > len(valid_cells) / 2 else "#ef5350") +
@@ -998,17 +1007,17 @@ def _build_matrix_html(result: MatrixTestResult) -> str:
         colorscale="RdYlGn",
         colorbar=dict(title="Avg Diff vs B&H (%)"),
         hovertemplate=(
-            "Short SMA: %{x}<br>"
-            "Long SMA: %{y}<br>"
+            f"Short {ind}: %{{x}}<br>"
+            f"Long {ind}: %{{y}}<br>"
             "Avg Diff vs B&H: %{z:.2f}%<extra></extra>"
         ),
         connectgaps=False,
     )])
     surface_fig.update_layout(
-        **_dark_fig_layout("SMA Matrix — Avg Return Difference vs Buy & Hold", height=600),
+        **_dark_fig_layout(f"{ind} Matrix — Avg Return Difference vs Buy & Hold", height=600),
         scene=dict(
-            xaxis_title="Short SMA",
-            yaxis_title="Long SMA",
+            xaxis_title=f"Short {ind}",
+            yaxis_title=f"Long {ind}",
             zaxis_title="Avg Diff vs B&H (%)",
             bgcolor="#1e1e1e",
             xaxis=dict(gridcolor="#333", color="#d4d4d4"),
@@ -1027,15 +1036,15 @@ def _build_matrix_html(result: MatrixTestResult) -> str:
         zmid=0,
         colorbar=dict(title="Avg Diff vs B&H (%)"),
         hovertemplate=(
-            "Short SMA: %{x}<br>"
-            "Long SMA: %{y}<br>"
+            f"Short {ind}: %{{x}}<br>"
+            f"Long {ind}: %{{y}}<br>"
             "Avg Diff vs B&H: %{z:.2f}%<extra></extra>"
         ),
     )])
     heatmap_fig.update_layout(
-        **_dark_fig_layout("SMA Matrix Heatmap", height=550),
-        xaxis_title="Short SMA",
-        yaxis_title="Long SMA",
+        **_dark_fig_layout(f"{ind} Matrix Heatmap", height=550),
+        xaxis_title=f"Short {ind}",
+        yaxis_title=f"Long {ind}",
     )
     heatmap_fig.update_xaxes(gridcolor="#333")
     heatmap_fig.update_yaxes(gridcolor="#333")
@@ -1150,7 +1159,7 @@ def _build_matrix_html(result: MatrixTestResult) -> str:
 <h1>Matrix Test Results</h1>
 <div class="run-meta">
   Capital: ${result.initial_capital:,.2f} &nbsp;|&nbsp;
-  SMA range: {result.sma_from} &ndash; {result.sma_to} ({len(result.sma_values)} values) &nbsp;|&nbsp;
+  {ind} range: {result.sma_from} &ndash; {result.sma_to} ({len(result.sma_values)} values) &nbsp;|&nbsp;
   {len(result.cells)} combinations &times; {result.assets_per_test} assets &nbsp;|&nbsp;
   Timeframe: {tf_desc} &nbsp;|&nbsp;
   Run at: {html.escape(result.timestamp)}
@@ -1174,13 +1183,13 @@ def _build_matrix_html(result: MatrixTestResult) -> str:
 
 <!-- Top/Bottom combos table -->
 <div class="table-wrap">
-  <h3>Top &amp; Bottom SMA Combinations</h3>
+  <h3>Top &amp; Bottom {ind} Combinations</h3>
   <table>
     <thead>
       <tr>
         <th style="text-align:right">#</th>
-        <th>Short SMA</th>
-        <th>Long SMA</th>
+        <th>Short {ind}</th>
+        <th>Long {ind}</th>
         <th style="text-align:right">Avg Diff vs B&amp;H</th>
         <th style="text-align:right">Avg Strategy Return</th>
         <th style="text-align:right">Avg B&amp;H Return</th>
