@@ -379,103 +379,110 @@ class ProjectQuantApp(ctk.CTk):
     def _build_single_test_tab(self, tab: ctk.CTkFrame, strat: str):
         s = self._st[strat]
         ind = "EMA" if strat == "ema" else "SMA"
-
-        ctk.CTkLabel(
-            tab, text="Run Backtest",
-            font=ctk.CTkFont(size=15, weight="bold"),
-        ).grid(row=0, column=0, columnspan=14, padx=12, pady=(12, 8), sticky="w")
-
-        # (internal key, display label, default, placeholder, width)
-        fields = [
-            ("Ticker",  "Ticker",          "",      "AAPL",       100),
-            ("From",    "From",            "",      "YYYY-MM-DD", 130),
-            ("To",      "To",              "",      "YYYY-MM-DD", 130),
-            ("Capital", "Capital",         "10000", "10000",      100),
-            ("Short",   f"Short {ind}",    "50",    "50",          80),
-            ("Long",    f"Long {ind}",     "200",   "200",         80),
-        ]
         s["bt_entries"] = {}
 
-        for i, (key, ui_label, default, ph, w) in enumerate(fields):
-            ctk.CTkLabel(tab, text=ui_label + ":").grid(
-                row=1, column=i * 2, padx=(12 if i == 0 else 4, 2), pady=(0, 12), sticky="e",
-            )
-            entry = ctk.CTkEntry(tab, width=w, placeholder_text=ph)
-            if default:
-                entry.insert(0, default)
-            entry.grid(row=1, column=i * 2 + 1, padx=(0, 8), pady=(0, 12))
+        ctk.CTkLabel(
+            tab, text="Single Backtest",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        # ── Row 1: Instrument & date range ───────────────────────────
+        row1 = ctk.CTkFrame(tab, fg_color="transparent")
+        row1.pack(fill="x", padx=12, pady=(0, 6))
+
+        for label, key, ph, w in [
+            ("Ticker", "Ticker", "AAPL",       100),
+            ("From",   "From",   "YYYY-MM-DD", 130),
+            ("To",     "To",     "YYYY-MM-DD", 130),
+        ]:
+            ctk.CTkLabel(row1, text=label + ":").pack(side="left", padx=(0, 4))
+            entry = ctk.CTkEntry(row1, width=w, placeholder_text=ph)
+            entry.pack(side="left", padx=(0, 14))
             s["bt_entries"][key] = entry
 
-        s["run_btn"] = ctk.CTkButton(
-            tab, text="Run Backtest", width=130,
-            fg_color="#26a69a", hover_color="#1e8c82",
-            command=lambda: self._run_backtest(strat),
-        )
-        s["run_btn"].grid(row=1, column=len(fields) * 2, padx=(8, 4), pady=(0, 12))
-
         s["full_range_btn"] = ctk.CTkButton(
-            tab, text="Full Range", width=100,
+            row1, text="Full Range", width=100,
             fg_color="#555", hover_color="#444",
             command=lambda: self._use_full_date_range(strat),
         )
-        s["full_range_btn"].grid(row=1, column=len(fields) * 2 + 1, padx=(0, 12), pady=(0, 12))
+        s["full_range_btn"].pack(side="left", padx=(0, 0))
 
-        # ── Row 2: short-selling settings ────────────────────────────
-        ctk.CTkLabel(tab, text="Allow Shorts:").grid(
-            row=2, column=0, padx=(12, 2), pady=(0, 10), sticky="e",
-        )
-        s["allow_short_var"] = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(tab, text="", variable=s["allow_short_var"], width=46).grid(
-            row=2, column=1, padx=(0, 8), pady=(0, 10), sticky="w",
-        )
+        # ── Row 2: Strategy & capital ─────────────────────────────────
+        row2 = ctk.CTkFrame(tab, fg_color="transparent")
+        row2.pack(fill="x", padx=12, pady=(0, 6))
 
-        short_fields = [
-            ("ShortRate", "Interest Rate (% p.a.)", "2.0", 70),
-            ("LongPct",   "Long % Capital",         "100", 70),
-            ("ShortPct",  "Short % Capital",        "100", 70),
-        ]
-        for col_offset, (key, ui_label, default, w) in enumerate(short_fields):
-            ctk.CTkLabel(tab, text=ui_label + ":").grid(
-                row=2, column=2 + col_offset * 2, padx=(4, 2), pady=(0, 10), sticky="e",
-            )
-            entry = ctk.CTkEntry(tab, width=w)
+        for label, key, default, w in [
+            (f"Short {ind}", "Short",   "50",    80),
+            (f"Long {ind}",  "Long",    "200",   80),
+            ("Capital",      "Capital", "10000", 110),
+        ]:
+            ctk.CTkLabel(row2, text=label + ":").pack(side="left", padx=(0, 4))
+            entry = ctk.CTkEntry(row2, width=w)
             entry.insert(0, default)
-            entry.grid(row=2, column=3 + col_offset * 2, padx=(0, 8), pady=(0, 10))
+            entry.pack(side="left", padx=(0, 16))
             s["bt_entries"][key] = entry
 
-        s["status_label"] = ctk.CTkLabel(tab, text="", text_color="#888888")
-        s["status_label"].grid(
-            row=3, column=0, columnspan=len(fields) * 2 + 2,
-            padx=12, pady=(0, 8), sticky="w",
+        # ── Row 3: Short-selling settings ────────────────────────────
+        row3 = ctk.CTkFrame(tab, fg_color="transparent")
+        row3.pack(fill="x", padx=12, pady=(0, 6))
+
+        ctk.CTkLabel(row3, text="Allow Shorts:").pack(side="left", padx=(0, 4))
+        s["allow_short_var"] = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(row3, text="", variable=s["allow_short_var"], width=46).pack(
+            side="left", padx=(0, 16),
         )
+        for label, key, default, w in [
+            ("Interest Rate (% p.a.)", "ShortRate", "2.0", 70),
+            ("Long % Capital",         "LongPct",   "100", 70),
+            ("Short % Capital",        "ShortPct",  "100", 70),
+        ]:
+            ctk.CTkLabel(row3, text=label + ":").pack(side="left", padx=(0, 4))
+            entry = ctk.CTkEntry(row3, width=w)
+            entry.insert(0, default)
+            entry.pack(side="left", padx=(0, 14))
+            s["bt_entries"][key] = entry
+
+        # ── Row 4: Action ─────────────────────────────────────────────
+        row4 = ctk.CTkFrame(tab, fg_color="transparent")
+        row4.pack(fill="x", padx=12, pady=(2, 8))
+
+        s["run_btn"] = ctk.CTkButton(
+            row4, text="Run Backtest", width=130,
+            fg_color="#26a69a", hover_color="#1e8c82",
+            command=lambda: self._run_backtest(strat),
+        )
+        s["run_btn"].pack(side="left", padx=(0, 12))
+
+        s["status_label"] = ctk.CTkLabel(row4, text="", text_color="#888888", anchor="w")
+        s["status_label"].pack(side="left", fill="x", expand=True)
 
     def _build_bulk_test_tab(self, tab: ctk.CTkFrame, strat: str):
         s = self._st[strat]
         ind = "EMA" if strat == "ema" else "SMA"
 
         ctk.CTkLabel(
-            tab, text="Run Bulk Backtest",
+            tab, text="Bulk Backtest",
             font=ctk.CTkFont(size=15, weight="bold"),
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
-        # ── Param row ────────────────────────────────────────────────
+        # ── Row 1: Strategy parameters & mode ────────────────────────
         param_row = ctk.CTkFrame(tab, fg_color="transparent")
-        param_row.pack(fill="x", padx=12, pady=(0, 4))
+        param_row.pack(fill="x", padx=12, pady=(0, 6))
 
         s["bulk_entries"] = {}
         for ui_label, key, default, width in [
-            ("Capital",       "Capital", "10000", 100),
-            (f"Short {ind}",  "Short",   "50",     80),
-            (f"Long {ind}",   "Long",    "200",    80),
+            (f"Short {ind}", "Short",   "50",    80),
+            (f"Long {ind}",  "Long",    "200",   80),
+            ("Capital",      "Capital", "10000", 110),
         ]:
-            ctk.CTkLabel(param_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(param_row, text=ui_label + ":").pack(side="left", padx=(0, 4))
             entry = ctk.CTkEntry(param_row, width=width)
             entry.insert(0, default)
-            entry.pack(side="left", padx=(0, 14))
+            entry.pack(side="left", padx=(0, 16))
             s["bulk_entries"][key] = entry
 
-        ctk.CTkLabel(param_row, text="Mode:").pack(side="left", padx=(0, 2))
-        s["bulk_mode_var"] = ctk.StringVar(value="Custom date range")
+        ctk.CTkLabel(param_row, text="Time period:").pack(side="left", padx=(0, 4))
+        s["bulk_mode_var"] = ctk.StringVar(value="Full history per ticker")
         ctk.CTkComboBox(
             param_row,
             values=["Custom date range", "Full history per ticker"],
@@ -483,16 +490,16 @@ class ProjectQuantApp(ctk.CTk):
             width=210,
             state="readonly",
             command=lambda _: self._on_bulk_mode_change(strat),
-        ).pack(side="left", padx=(0, 8))
+        ).pack(side="left", padx=(0, 0))
 
-        # ── Short-selling settings row ────────────────────────────────
+        # ── Row 2: Short-selling settings ────────────────────────────
         short_row = ctk.CTkFrame(tab, fg_color="transparent")
-        short_row.pack(fill="x", padx=12, pady=(0, 4))
+        short_row.pack(fill="x", padx=12, pady=(0, 6))
 
-        ctk.CTkLabel(short_row, text="Allow Shorts:").pack(side="left", padx=(0, 2))
+        ctk.CTkLabel(short_row, text="Allow Shorts:").pack(side="left", padx=(0, 4))
         s["bulk_allow_short_var"] = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(short_row, text="", variable=s["bulk_allow_short_var"], width=46).pack(
-            side="left", padx=(0, 14),
+            side="left", padx=(0, 16),
         )
         s["bulk_short_entries"] = {}
         for ui_label, key, default, width in [
@@ -500,15 +507,14 @@ class ProjectQuantApp(ctk.CTk):
             ("Long % Capital",         "LongPct",   "100",  70),
             ("Short % Capital",        "ShortPct",  "100",  70),
         ]:
-            ctk.CTkLabel(short_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(short_row, text=ui_label + ":").pack(side="left", padx=(0, 4))
             entry = ctk.CTkEntry(short_row, width=width)
             entry.insert(0, default)
             entry.pack(side="left", padx=(0, 14))
             s["bulk_short_entries"][key] = entry
 
-        # ── Date row (toggled by mode selection) ─────────────────────
+        # ── Date row (toggled by time period selection) ───────────────
         s["bulk_date_row"] = ctk.CTkFrame(tab, fg_color="transparent")
-        s["bulk_date_row"].pack(fill="x", padx=12, pady=(0, 4))
 
         ctk.CTkLabel(s["bulk_date_row"], text="From:").pack(side="left", padx=(0, 2))
         s["bulk_from_entry"] = ctk.CTkEntry(
@@ -686,29 +692,29 @@ class ProjectQuantApp(ctk.CTk):
         ind = "EMA" if strat == "ema" else "SMA"
 
         ctk.CTkLabel(
-            tab, text="Run Matrix Test",
+            tab, text="Matrix Test",
             font=ctk.CTkFont(size=15, weight="bold"),
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
-        # ── Param row ────────────────────────────────────────────────
+        # ── Row 1: Window range & combination limits ──────────────────
         param_row = ctk.CTkFrame(tab, fg_color="transparent")
-        param_row.pack(fill="x", padx=12, pady=(0, 4))
+        param_row.pack(fill="x", padx=12, pady=(0, 6))
 
         s["matrix_entries"] = {}
         for ui_label, key, default, width in [
-            ("Assets per Test",  "Assets per Test",  "30",  70),
-            (f"{ind} From",      "From",             "3",   60),
-            (f"{ind} To",        "To",               "200", 60),
-            ("Max Combinations", "Max Combinations", "150", 70),
-            ("Capital",          "Capital",          "10000", 100),
+            (f"{ind} From",      "From",             "3",     60),
+            (f"{ind} To",        "To",               "200",   60),
+            ("Assets per Test",  "Assets per Test",  "30",    70),
+            ("Max Combinations", "Max Combinations", "150",   70),
+            ("Capital",          "Capital",          "10000", 110),
         ]:
-            ctk.CTkLabel(param_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(param_row, text=ui_label + ":").pack(side="left", padx=(0, 4))
             entry = ctk.CTkEntry(param_row, width=width)
             entry.insert(0, default)
-            entry.pack(side="left", padx=(0, 14))
+            entry.pack(side="left", padx=(0, 16))
             s["matrix_entries"][key] = entry
 
-        ctk.CTkLabel(param_row, text="Mode:").pack(side="left", padx=(0, 2))
+        ctk.CTkLabel(param_row, text="Time period:").pack(side="left", padx=(0, 4))
         s["matrix_mode_var"] = ctk.StringVar(value="Full history per ticker")
         ctk.CTkComboBox(
             param_row,
@@ -717,16 +723,16 @@ class ProjectQuantApp(ctk.CTk):
             width=210,
             state="readonly",
             command=lambda _: self._on_matrix_mode_change(strat),
-        ).pack(side="left", padx=(0, 8))
+        ).pack(side="left", padx=(0, 0))
 
-        # ── Short-selling settings row ────────────────────────────────
+        # ── Row 2: Short-selling settings ────────────────────────────
         matrix_short_row = ctk.CTkFrame(tab, fg_color="transparent")
-        matrix_short_row.pack(fill="x", padx=12, pady=(0, 4))
+        matrix_short_row.pack(fill="x", padx=12, pady=(0, 6))
 
-        ctk.CTkLabel(matrix_short_row, text="Allow Shorts:").pack(side="left", padx=(0, 2))
+        ctk.CTkLabel(matrix_short_row, text="Allow Shorts:").pack(side="left", padx=(0, 4))
         s["matrix_allow_short_var"] = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(matrix_short_row, text="", variable=s["matrix_allow_short_var"], width=46).pack(
-            side="left", padx=(0, 14),
+            side="left", padx=(0, 16),
         )
         s["matrix_short_entries"] = {}
         for ui_label, key, default, width in [
@@ -734,7 +740,7 @@ class ProjectQuantApp(ctk.CTk):
             ("Long % Capital",         "LongPct",   "100",  70),
             ("Short % Capital",        "ShortPct",  "100",  70),
         ]:
-            ctk.CTkLabel(matrix_short_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(matrix_short_row, text=ui_label + ":").pack(side="left", padx=(0, 4))
             entry = ctk.CTkEntry(matrix_short_row, width=width)
             entry.insert(0, default)
             entry.pack(side="left", padx=(0, 14))
