@@ -88,57 +88,109 @@ def _build_chart(
         row=1, col=1,
     )
 
-    # --- Entry / Exit markers ---
-    buy_dates, buy_prices, buy_texts = [], [], []
-    sell_dates, sell_prices, sell_texts = [], [], []
+    # --- Entry / Exit markers (direction-aware, transitions merged) ---
+    from collections import defaultdict as _dd
 
+    entries_by_date: dict = _dd(list)
+    exits_by_date: dict = _dd(list)
     for t in trades:
-        buy_dates.append(pd.Timestamp(t.entry_date))
-        buy_prices.append(t.entry_price)
-        buy_texts.append(
-            f"BUY {t.shares} shares @ ${t.entry_price:,.2f}<br>"
-            f"Capital: ${t.capital_start:,.2f}<br>"
-            f"Investment: ${t.investment:,.2f}"
+        entries_by_date[t.entry_date].append(t)
+        exits_by_date[t.exit_date].append(t)
+
+    # A "transition" date is one where the previous position closes AND a new
+    # one opens on the same bar (i.e. a crossover flip).  Show ONE marker.
+    transition_dates = set(entries_by_date) & set(exits_by_date)
+
+    long_buy_d,   long_buy_p,   long_buy_t   = [], [], []  # open long  (standalone)
+    long_sell_d,  long_sell_p,  long_sell_t  = [], [], []  # close long (standalone)
+    short_open_d, short_open_p, short_open_t = [], [], []  # open short (standalone)
+    short_cov_d,  short_cov_p,  short_cov_t  = [], [], []  # cover short (standalone)
+    flip_ls_d,    flip_ls_p,    flip_ls_t    = [], [], []  # long → short flip
+    flip_sl_d,    flip_sl_p,    flip_sl_t    = [], [], []  # short → long flip
+
+    for date, ts in entries_by_date.items():
+        if date in transition_dates:
+            continue
+        for t in ts:
+            if getattr(t, "direction", "long") == "long":
+                long_buy_d.append(pd.Timestamp(date))
+                long_buy_p.append(t.entry_price)
+                long_buy_t.append(
+                    f"BUY {t.shares} shares @ ${t.entry_price:,.2f}<br>"
+                    f"Capital: ${t.capital_start:,.2f}<br>"
+                    f"Investment: ${t.investment:,.2f}"
+                )
+            else:
+                short_open_d.append(pd.Timestamp(date))
+                short_open_p.append(t.entry_price)
+                short_open_t.append(
+                    f"SELL SHORT {t.shares} shares @ ${t.entry_price:,.2f}<br>"
+                    f"Capital: ${t.capital_start:,.2f}<br>"
+                    f"Notional: ${t.investment:,.2f}"
+                )
+
+    for date, ts in exits_by_date.items():
+        if date in transition_dates:
+            continue
+        for t in ts:
+            pc = "#26a69a" if t.pnl >= 0 else "#ef5350"
+            if getattr(t, "direction", "long") == "long":
+                long_sell_d.append(pd.Timestamp(date))
+                long_sell_p.append(t.exit_price)
+                long_sell_t.append(
+                    f"SELL {t.shares} shares @ ${t.exit_price:,.2f}<br>"
+                    f"P&L: <span style='color:{pc}'>${t.pnl:,.2f}</span><br>"
+                    f"Capital: ${t.capital_end:,.2f}"
+                )
+            else:
+                short_cov_d.append(pd.Timestamp(date))
+                short_cov_p.append(t.exit_price)
+                short_cov_t.append(
+                    f"COVER {t.shares} shares @ ${t.exit_price:,.2f}<br>"
+                    f"P&L: <span style='color:{pc}'>${t.pnl:,.2f}</span><br>"
+                    f"Capital: ${t.capital_end:,.2f}"
+                )
+
+    for date in transition_dates:
+        ex = exits_by_date[date][0]
+        en = entries_by_date[date][0]
+        price = ex.exit_price
+        pc = "#26a69a" if ex.pnl >= 0 else "#ef5350"
+        lbl = "LONG → SHORT" if getattr(ex, "direction", "long") == "long" else "SHORT → LONG"
+        txt = (
+            f"{lbl}<br>"
+            f"Closed {ex.shares} @ ${price:,.2f} · "
+            f"P&L: <span style='color:{pc}'>${ex.pnl:,.2f}</span><br>"
+            f"Opened {en.shares} @ ${price:,.2f}"
+        )
+        if getattr(ex, "direction", "long") == "long":
+            flip_ls_d.append(pd.Timestamp(date))
+            flip_ls_p.append(price)
+            flip_ls_t.append(txt)
+        else:
+            flip_sl_d.append(pd.Timestamp(date))
+            flip_sl_p.append(price)
+            flip_sl_t.append(txt)
+
+    def _mkr(x, y, text, name, symbol, color, size=14):
+        return go.Scatter(
+            x=x, y=y, mode="markers", name=name,
+            marker=dict(symbol=symbol, size=size, color=color,
+                        line=dict(width=1, color="#fff")),
+            hovertemplate="%{text}<extra></extra>",
+            text=text,
         )
 
-        sell_dates.append(pd.Timestamp(t.exit_date))
-        sell_prices.append(t.exit_price)
-        pnl_color = "#26a69a" if t.pnl >= 0 else "#ef5350"
-        sell_texts.append(
-            f"SELL {t.shares} shares @ ${t.exit_price:,.2f}<br>"
-            f"P&L: <span style='color:{pnl_color}'>${t.pnl:,.2f}</span><br>"
-            f"Capital: ${t.capital_end:,.2f}"
-        )
-
-    fig.add_trace(
-        go.Scatter(
-            x=buy_dates, y=buy_prices,
-            mode="markers",
-            name="Buy",
-            marker=dict(
-                symbol="triangle-up", size=14, color="#26a69a",
-                line=dict(width=1, color="#fff"),
-            ),
-            hovertemplate="%{text}<extra></extra>",
-            text=buy_texts,
-        ),
-        row=1, col=1,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=sell_dates, y=sell_prices,
-            mode="markers",
-            name="Sell",
-            marker=dict(
-                symbol="triangle-down", size=14, color="#ef5350",
-                line=dict(width=1, color="#fff"),
-            ),
-            hovertemplate="%{text}<extra></extra>",
-            text=sell_texts,
-        ),
-        row=1, col=1,
-    )
+    for trace in [
+        _mkr(long_buy_d,   long_buy_p,   long_buy_t,   "Buy",         "triangle-up",   "#26a69a"),
+        _mkr(long_sell_d,  long_sell_p,  long_sell_t,  "Sell",        "triangle-down", "#ef5350"),
+        _mkr(short_open_d, short_open_p, short_open_t, "Sell Short",  "triangle-down", "#ff9800"),
+        _mkr(short_cov_d,  short_cov_p,  short_cov_t,  "Cover Short", "triangle-up",   "#42a5f5"),
+        _mkr(flip_ls_d,    flip_ls_p,    flip_ls_t,    "Long→Short",  "diamond",       "#ff9800", size=16),
+        _mkr(flip_sl_d,    flip_sl_p,    flip_sl_t,    "Short→Long",  "diamond",       "#26a69a", size=16),
+    ]:
+        if trace.x:
+            fig.add_trace(trace, row=1, col=1)
 
     # --- Volume bars ---
     colors = [
@@ -210,9 +262,13 @@ def _build_html(
         pnl_color = "#26a69a" if t.pnl >= 0 else "#ef5350"
         vs_bh_diff = t.capital_end - t.bh_capital_end
         vs_bh_color = "#26a69a" if vs_bh_diff >= 0 else "#ef5350"
+        direction = getattr(t, "direction", "long")
+        dir_label = "SHORT" if direction == "short" else "LONG"
+        dir_color = "#ff9800" if direction == "short" else "#26a69a"
         trade_rows += f"""
         <tr>
             <td>{i}</td>
+            <td style="color:{dir_color};font-weight:600">{dir_label}</td>
             <td>{html.escape(t.entry_date)}</td>
             <td>${t.entry_price:,.2f}</td>
             <td>{html.escape(t.exit_date)}</td>
@@ -342,7 +398,7 @@ def _build_html(
   {"" if not result.trades else f'''<table>
     <thead>
       <tr>
-        <th>#</th><th>Entry Date</th><th>Entry Price</th>
+        <th>#</th><th>Dir</th><th>Entry Date</th><th>Entry Price</th>
         <th>Exit Date</th><th>Exit Price</th><th>Shares</th>
         <th>Capital Start</th><th>Investment</th><th>Capital End</th><th>B&amp;H Capital End</th><th>vs B&amp;H</th><th>P&amp;L</th>
       </tr>

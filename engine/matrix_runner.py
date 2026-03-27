@@ -79,6 +79,10 @@ def run_matrix_test(
     start: str | None,
     end: str | None,
     strategy_type: str = "sma",
+    allow_short: bool = False,
+    short_interest_rate: float = 0.0,
+    long_pct: float = 100.0,
+    short_pct: float = 100.0,
     workers: int = 8,
     progress_cb: Callable[[int, int, str], None] | None = None,
 ) -> MatrixTestResult:
@@ -103,7 +107,9 @@ def run_matrix_test(
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
-                _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode, strategy_type
+                _run_one, ds, start, end, capital, short_sma, long_sma,
+                timeframe_mode, strategy_type, allow_short, short_interest_rate,
+                long_pct, short_pct,
             ): (short_sma, long_sma)
             for ds, short_sma, long_sma in tasks
         }

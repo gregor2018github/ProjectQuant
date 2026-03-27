@@ -278,6 +278,10 @@ class ProjectQuantApp(ctk.CTk):
         capital_str = s["bt_entries"]["Capital"].get().strip()
         short_str = s["bt_entries"]["Short"].get().strip()
         long_str = s["bt_entries"]["Long"].get().strip()
+        allow_short = s["allow_short_var"].get()
+        short_rate_str = s["bt_entries"]["ShortRate"].get().strip()
+        long_pct_str = s["bt_entries"]["LongPct"].get().strip()
+        short_pct_str = s["bt_entries"]["ShortPct"].get().strip()
 
         if not ticker or not start or not end:
             s["status_label"].configure(
@@ -289,6 +293,9 @@ class ProjectQuantApp(ctk.CTk):
             capital = float(capital_str) if capital_str else 10_000.0
             short_window = int(short_str) if short_str else 50
             long_window = int(long_str) if long_str else 200
+            short_rate = float(short_rate_str) if short_rate_str else 2.0
+            long_pct = float(long_pct_str) if long_pct_str else 100.0
+            short_pct = float(short_pct_str) if short_pct_str else 100.0
         except ValueError:
             s["status_label"].configure(text="Invalid numeric input.", text_color="#ef5350")
             return
@@ -312,7 +319,13 @@ class ProjectQuantApp(ctk.CTk):
 
                 df = fetch_data(ticker, start, end)
                 signals = strategy.generate_signals(df)
-                bt = Backtester(initial_capital=capital)
+                bt = Backtester(
+                    initial_capital=capital,
+                    allow_short=allow_short,
+                    short_interest_rate=short_rate,
+                    long_pct=long_pct,
+                    short_pct=short_pct,
+                )
                 result = bt.run(df, signals)
 
                 self.after(0, lambda: self._on_backtest_done(
@@ -407,9 +420,32 @@ class ProjectQuantApp(ctk.CTk):
         )
         s["full_range_btn"].grid(row=1, column=len(fields) * 2 + 1, padx=(0, 12), pady=(0, 12))
 
+        # ── Row 2: short-selling settings ────────────────────────────
+        ctk.CTkLabel(tab, text="Allow Shorts:").grid(
+            row=2, column=0, padx=(12, 2), pady=(0, 10), sticky="e",
+        )
+        s["allow_short_var"] = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(tab, text="", variable=s["allow_short_var"], width=46).grid(
+            row=2, column=1, padx=(0, 8), pady=(0, 10), sticky="w",
+        )
+
+        short_fields = [
+            ("ShortRate", "Interest Rate (% p.a.)", "2.0", 70),
+            ("LongPct",   "Long % Capital",         "100", 70),
+            ("ShortPct",  "Short % Capital",        "100", 70),
+        ]
+        for col_offset, (key, ui_label, default, w) in enumerate(short_fields):
+            ctk.CTkLabel(tab, text=ui_label + ":").grid(
+                row=2, column=2 + col_offset * 2, padx=(4, 2), pady=(0, 10), sticky="e",
+            )
+            entry = ctk.CTkEntry(tab, width=w)
+            entry.insert(0, default)
+            entry.grid(row=2, column=3 + col_offset * 2, padx=(0, 8), pady=(0, 10))
+            s["bt_entries"][key] = entry
+
         s["status_label"] = ctk.CTkLabel(tab, text="", text_color="#888888")
         s["status_label"].grid(
-            row=2, column=0, columnspan=len(fields) * 2 + 2,
+            row=3, column=0, columnspan=len(fields) * 2 + 2,
             padx=12, pady=(0, 8), sticky="w",
         )
 
@@ -448,6 +484,27 @@ class ProjectQuantApp(ctk.CTk):
             state="readonly",
             command=lambda _: self._on_bulk_mode_change(strat),
         ).pack(side="left", padx=(0, 8))
+
+        # ── Short-selling settings row ────────────────────────────────
+        short_row = ctk.CTkFrame(tab, fg_color="transparent")
+        short_row.pack(fill="x", padx=12, pady=(0, 4))
+
+        ctk.CTkLabel(short_row, text="Allow Shorts:").pack(side="left", padx=(0, 2))
+        s["bulk_allow_short_var"] = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(short_row, text="", variable=s["bulk_allow_short_var"], width=46).pack(
+            side="left", padx=(0, 14),
+        )
+        s["bulk_short_entries"] = {}
+        for ui_label, key, default, width in [
+            ("Interest Rate (% p.a.)", "ShortRate", "2.0",  70),
+            ("Long % Capital",         "LongPct",   "100",  70),
+            ("Short % Capital",        "ShortPct",  "100",  70),
+        ]:
+            ctk.CTkLabel(short_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
+            entry = ctk.CTkEntry(short_row, width=width)
+            entry.insert(0, default)
+            entry.pack(side="left", padx=(0, 14))
+            s["bulk_short_entries"][key] = entry
 
         # ── Date row (toggled by mode selection) ─────────────────────
         s["bulk_date_row"] = ctk.CTkFrame(tab, fg_color="transparent")
@@ -511,11 +568,18 @@ class ProjectQuantApp(ctk.CTk):
         short_str = s["bulk_entries"]["Short"].get().strip()
         long_str = s["bulk_entries"]["Long"].get().strip()
         mode = s["bulk_mode_var"].get()
+        allow_short = s["bulk_allow_short_var"].get()
+        short_rate_str = s["bulk_short_entries"]["ShortRate"].get().strip()
+        long_pct_str = s["bulk_short_entries"]["LongPct"].get().strip()
+        short_pct_str = s["bulk_short_entries"]["ShortPct"].get().strip()
 
         try:
             capital = float(capital_str) if capital_str else 10_000.0
             short_window = int(short_str) if short_str else 50
             long_window = int(long_str) if long_str else 200
+            short_rate = float(short_rate_str) if short_rate_str else 2.0
+            long_pct = float(long_pct_str) if long_pct_str else 100.0
+            short_pct = float(short_pct_str) if short_pct_str else 100.0
         except ValueError:
             s["bulk_status_label"].configure(
                 text="Invalid numeric input.", text_color="#ef5350",
@@ -565,6 +629,10 @@ class ProjectQuantApp(ctk.CTk):
                     long_sma=long_window,
                     timeframe_mode=mode,
                     strategy_type=strat,
+                    allow_short=allow_short,
+                    short_interest_rate=short_rate,
+                    long_pct=long_pct,
+                    short_pct=short_pct,
                     workers=8,
                     progress_cb=_progress_cb,
                 )
@@ -651,6 +719,27 @@ class ProjectQuantApp(ctk.CTk):
             command=lambda _: self._on_matrix_mode_change(strat),
         ).pack(side="left", padx=(0, 8))
 
+        # ── Short-selling settings row ────────────────────────────────
+        matrix_short_row = ctk.CTkFrame(tab, fg_color="transparent")
+        matrix_short_row.pack(fill="x", padx=12, pady=(0, 4))
+
+        ctk.CTkLabel(matrix_short_row, text="Allow Shorts:").pack(side="left", padx=(0, 2))
+        s["matrix_allow_short_var"] = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(matrix_short_row, text="", variable=s["matrix_allow_short_var"], width=46).pack(
+            side="left", padx=(0, 14),
+        )
+        s["matrix_short_entries"] = {}
+        for ui_label, key, default, width in [
+            ("Interest Rate (% p.a.)", "ShortRate", "2.0",  70),
+            ("Long % Capital",         "LongPct",   "100",  70),
+            ("Short % Capital",        "ShortPct",  "100",  70),
+        ]:
+            ctk.CTkLabel(matrix_short_row, text=ui_label + ":").pack(side="left", padx=(0, 2))
+            entry = ctk.CTkEntry(matrix_short_row, width=width)
+            entry.insert(0, default)
+            entry.pack(side="left", padx=(0, 14))
+            s["matrix_short_entries"][key] = entry
+
         # ── Date row (toggled by mode selection) ─────────────────────
         s["matrix_date_row"] = ctk.CTkFrame(tab, fg_color="transparent")
 
@@ -711,6 +800,10 @@ class ProjectQuantApp(ctk.CTk):
             sma_to = int(s["matrix_entries"]["To"].get().strip())
             max_combos = int(s["matrix_entries"]["Max Combinations"].get().strip())
             capital = float(s["matrix_entries"]["Capital"].get().strip() or "10000")
+            allow_short = s["matrix_allow_short_var"].get()
+            short_rate = float(s["matrix_short_entries"]["ShortRate"].get().strip() or "2.0")
+            long_pct = float(s["matrix_short_entries"]["LongPct"].get().strip() or "100")
+            short_pct = float(s["matrix_short_entries"]["ShortPct"].get().strip() or "100")
         except ValueError:
             s["matrix_status_label"].configure(
                 text="Invalid numeric input.", text_color="#ef5350",
@@ -785,6 +878,10 @@ class ProjectQuantApp(ctk.CTk):
                     start=start,
                     end=end,
                     strategy_type=strat,
+                    allow_short=allow_short,
+                    short_interest_rate=short_rate,
+                    long_pct=long_pct,
+                    short_pct=short_pct,
                     workers=8,
                     progress_cb=_progress_cb,
                 )

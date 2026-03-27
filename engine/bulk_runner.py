@@ -83,6 +83,10 @@ def _run_one(
     long_sma: int,
     timeframe_mode: str,
     strategy_type: str = "sma",
+    allow_short: bool = False,
+    short_interest_rate: float = 0.0,
+    long_pct: float = 100.0,
+    short_pct: float = 100.0,
 ) -> TickerResult:
     """Run a single backtest for *dataset*; captures any exception as an error field."""
     ticker = dataset.ticker
@@ -120,7 +124,13 @@ def _run_one(
             from strategies.sma_cross import SMACrossStrategy
             strategy = SMACrossStrategy(short_window=short_sma, long_window=long_sma)
         signals = strategy.generate_signals(df)
-        bt = Backtester(initial_capital=capital)
+        bt = Backtester(
+            initial_capital=capital,
+            allow_short=allow_short,
+            short_interest_rate=short_interest_rate,
+            long_pct=long_pct,
+            short_pct=short_pct,
+        )
         result = bt.run(df, signals)
 
         strat_return_pct = round(((result.final_value - capital) / capital) * 100, 2)
@@ -160,6 +170,10 @@ def run_bulk_backtest(
     long_sma: int,
     timeframe_mode: str = "Custom date range",
     strategy_type: str = "sma",
+    allow_short: bool = False,
+    short_interest_rate: float = 0.0,
+    long_pct: float = 100.0,
+    short_pct: float = 100.0,
     workers: int = 8,
     progress_cb: Callable[[int, int, str], None] | None = None,
 ) -> BulkBacktestResult:
@@ -175,7 +189,9 @@ def run_bulk_backtest(
     with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
-                _run_one, ds, start, end, capital, short_sma, long_sma, timeframe_mode, strategy_type
+                _run_one, ds, start, end, capital, short_sma, long_sma,
+                timeframe_mode, strategy_type, allow_short, short_interest_rate,
+                long_pct, short_pct,
             ): i
             for i, ds in enumerate(datasets)
         }
